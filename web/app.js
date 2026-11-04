@@ -111,6 +111,10 @@ function captureUrl(frame) {
   return `/api/runs/${encodeURIComponent(selected)}/screens/${encodeURIComponent(frame)}.png`;
 }
 
+function elementText(element) {
+  return [`<${element.tag}>`, element.role, element.text].filter(Boolean).join(" ");
+}
+
 function eventText(event) {
   switch (event.kind) {
     case "frame": return ["화면 캡처", event.path];
@@ -118,6 +122,12 @@ function eventText(event) {
       const { action, text } = event.action;
       const label = actions[action] ?? action;
       return [action === "input" && text ? `${label} · ${text}` : label, event.remark];
+    }
+    case "tap_target": {
+      const { x, y, target, interactive } = event;
+      const hit = target ? elementText(target) : "대상 확인 불가";
+      const nearest = interactive ? ` · 조작 요소 ${elementText(interactive)}` : " · 조작 요소 없음";
+      return [`탭 대상 (${x}, ${y})`, hit + nearest];
     }
     case "action_result": return ["조작 결과", event.result];
     case "auth": return ["인증", statuses[event.status] ?? event.status];
@@ -145,6 +155,19 @@ function renderActivity() {
   } else {
     image.removeAttribute("src");
   }
+  const tap = events.findLast(event => event.kind === "tap_target" && event.frame === current?.frame);
+  const marker = $("tap-marker");
+  const { width, height } = tap?.viewport ?? {};
+  const hasPosition = [tap?.x, tap?.y, width, height].every(Number.isInteger)
+    && tap.x >= 0 && tap.x < width && tap.y >= 0 && tap.y < height;
+  const showMarker = () => { marker.hidden = !hasPosition || !image.complete || !image.naturalWidth; };
+  if (hasPosition) {
+    marker.style.left = `${tap.x / width * 100}%`;
+    marker.style.top = `${tap.y / height * 100}%`;
+  }
+  image.onload = showMarker;
+  image.onerror = showMarker;
+  showMarker();
 
   const spoken = new Set(events.filter(event => event.kind === "action").map(event => event.frame));
   const timeline = events.filter(event => !["interview", "discussion", "debrief_error"].includes(event.kind)

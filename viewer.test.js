@@ -36,14 +36,30 @@ test("웹 관찰실은 새 실행을 발견하고 선택한 장면을 유지하�
   };
   await frame(1);
   await record({ kind: "action", frame: "P1-free-01", task: "free", action: { action: "tap" }, remark: "노선을 찾아볼게요." });
+  await record({
+    kind: "tap_target", frame: "P1-free-01", task: "free", x: 78, y: 211, viewport: { width: 390, height: 844 },
+    target: { tag: "span", text: "노선 검색" }, interactive: { tag: "button", role: "button", text: "노선 검색" },
+  });
   const first = page.getByRole("button", { name: /강정식.*노선을 찾아볼게요/ });
   await first.click();
-  await page.waitForFunction(() => document.getElementById("capture").naturalWidth > 0);
+  const hit = page.getByRole("button", { name: /탭 대상 \(78, 211\).*<span> 노선 검색.*조작 요소 <button>/ });
+  await hit.waitFor();
+  const marker = page.locator("#tap-marker");
+  const capture = page.locator("#capture");
+  await marker.waitFor();
+  const dot = await marker.boundingBox();
+  const screen = await capture.boundingBox();
+  assert.ok(Math.abs(dot.x + dot.width / 2 - (screen.x + screen.width * .2)) < 1);
+  assert.ok(Math.abs(dot.y + dot.height / 2 - (screen.y + screen.height * .25)) < 1);
+  assert.equal(await page.locator("#events").getByText("응답 오류").count(), 0);
   await frame(2);
   await page.getByRole("button", { name: /화면 캡처/ }).waitFor();
   assert.match(await page.locator("#capture").getAttribute("src"), /P1-free-01\.png$/);
   await page.getByRole("button", { name: "최신 화면으로" }).click();
   assert.match(await page.locator("#capture").getAttribute("src"), /P1-free-02\.png$/);
+  await marker.waitFor({ state: "hidden" });
+  await hit.click();
+  await marker.waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 
   await record({ kind: "interview", question: "어떤 화면을 기대했나요?", answer: "노선 목록을 기대했어요." });

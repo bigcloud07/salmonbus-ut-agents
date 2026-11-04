@@ -137,7 +137,10 @@ async function runPhase({ session, persona, task, limit, deadline, model, record
       errorSource = "browser";
       const result = await session.act(action);
       errorSource = "runner";
-      if (result) {
+      if (decision.action === "tap") {
+        const { x, y } = decision;
+        await add({ kind: "tap_target", frame, x, y, viewport, ...result });
+      } else if (result) {
         console.log(`[${frame}] ${result}`);
         await add({ kind: "action_result", frame, result });
       }
@@ -238,7 +241,7 @@ function reviewEvidence(events, frames) {
     if (previous && previous.persona === frame.persona && previous.task === frame.task) nextFrames.set(previous.frame, frame.frame);
     previous = frame;
   }
-  return events.filter(event => ["frame", "action", "action_result", "auth", "end", "error", "interview"].includes(event.kind))
+  return events.filter(event => ["frame", "action", "action_result", "tap_target", "auth", "end", "error", "interview"].includes(event.kind))
     .map(event => event.kind === "action" ? {
       ...event,
       before: event.frame,
@@ -266,6 +269,7 @@ async function writeReport({ model, people, events, directory, origin, file = "r
 인증 단계는 운영 비회원 테스트에서 미실행입니다. 실행 오류나 제한에 걸린 경우 기록을 근거로 판단을 보류할 수 있습니다.
 반복 조작, 기대와 실제 화면의 차이, 되돌아가기와 우회 행동을 우선 살피세요. 앞뒤 화면과 인터뷰를 대조해 어떤 장면에서 무엇이 바뀌었는지, 참가자가 어떻게 대응했는지 적으세요.
 인터뷰는 참가자의 해석입니다. 화면과 행동으로 확인한 사실을 구분하고, 자료로 구분할 수 없는 UI 문제, 모델 조작 실수, 예보 부재는 가설로 남기세요.
+tap_target은 같은 frame에서 터치가 전달된 요소와 가장 가까운 조작 요소입니다. target이 null이면 터치 대상이 기록되지 않은 경우입니다. 대상과 앞뒤 화면을 함께 보고, 이 기록만으로 조작 결과를 단정하지 마세요.
 after가 null이면 해당 행동 뒤 화면이 기록되지 않았습니다. 판정과 발견의 evidence에는 관련 화면 ID를 하나씩 정확히 적으세요. 범위나 접두어는 사용하지 마세요. 과업 판정의 근거는 그 참가자의 같은 과업 화면에서 고르세요.
 기록에 없는 조작이나 결과를 추가하지 마세요.`,
         prompt: JSON.stringify({

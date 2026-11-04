@@ -1,9 +1,20 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 export const production = "https://www.salmonbus.com";
 export const viewport = { width: 390, height: 844 };
 
 const kakaoStart = "/api/auth/kakao/start";
 const kakaoCallback = "/api/auth/kakao/callback";
 const sessionPath = "/api/auth/session";
+const tapLabelLimit = 80;
+
+function tapElement(element) {
+  if (typeof element?.tag !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(element.tag)) return null;
+  const bounded = (value, limit) => typeof value === "string"
+    ? value.slice(0, limit).replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, " ").trim()
+    : "";
+  return { tag: element.tag, role: bounded(element.role, 40), text: bounded(element.text, tapLabelLimit) };
+}
 
 function authPath(path) {
   return /^\/(?:api\/auth|oauth2|login\/oauth2)(?:\/|$)/i.test(path);
@@ -97,10 +108,18 @@ export async function openSession(browser, {
   }
 
   const page = await context.newPage();
+  let nextTapId = 0;
+  let pendingTap;
   page.setDefaultTimeout(5_000);
   context.on("page", popup => { if (popup !== page) void popup.close().catch(() => {}); });
   page.on("dialog", dialog => void dialog.dismiss().catch(() => {}));
   try {
+    await page.exposeBinding("recordUtTap", ({ frame }, id, target, interactive) => {
+      if (!pendingTap || id !== pendingTap.id || frame !== page.mainFrame()) return;
+      const url = new URL(frame.url());
+      if (authInProgress || authUnsafe || url.origin !== origin || authPath(url.pathname)) return;
+      pendingTap.resolve({ target: tapElement(target), interactive: tapElement(interactive) });
+    });
     await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 10_000 });
   } catch (error) {
     await context.close();
@@ -152,6 +171,36 @@ export async function openSession(browser, {
     return attempt ? await attempt : undefined;
   }
 
+  async function tap(x, y) {
+    const id = ++nextTapId;
+    const { promise, resolve } = Promise.withResolvers();
+    pendingTap = { id, resolve };
+    try {
+      await page.evaluate(({ id, tapLabelLimit }) => {
+        const editable = "input, textarea, select, [contenteditable]";
+        const control = 'button, a[href], label, summary, input, select, textarea, [contenteditable], [tabindex], [role="button"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], [role="option"], [role="menuitem"]';
+        window.addEventListener("pointerdown", event => {
+          if (!event.isTrusted || event.pointerType !== "touch") return;
+          const elements = event.composedPath().filter(node => node instanceof Element);
+          const interactive = elements.find(element => element.matches(control));
+          const describe = element => {
+            if (!element) return null;
+            const label = element.getAttribute("aria-label") ?? "";
+            const readText = (element === interactive || element.childElementCount === 0)
+              && !element.closest(editable) && !element.querySelector(editable);
+            const text = readText ? element.innerText?.trim() || label : label;
+            return { tag: element.localName, role: element.getAttribute("role"), text: text.slice(0, tapLabelLimit) };
+          };
+          void window.recordUtTap(id, describe(elements[0]), describe(interactive)).catch(() => {});
+        }, { capture: true, once: true, signal: AbortSignal.timeout(1000) });
+      }, { id, tapLabelLimit });
+      await page.touchscreen.tap(x, y);
+      return await Promise.race([promise, delay(150, { target: null, interactive: null })]);
+    } finally {
+      pendingTap = undefined;
+    }
+  }
+
   return {
     page,
     takeAuth,
@@ -196,8 +245,7 @@ export async function openSession(browser, {
       }
       switch (kind) {
         case "tap":
-          await page.touchscreen.tap(x, y);
-          break;
+          return tap(x, y);
         case "input": {
           const editable = await page.evaluate(() => {
             const el = document.activeElement;
