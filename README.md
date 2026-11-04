@@ -10,9 +10,7 @@
   </p>
 </div>
 
-![흑백 관찰실에서 참가자 이름을 선택하고 medium과 low 리포트를 비교하는 화면](docs/ut-viewer.png)
-
-*예시 기록을 표시한 관찰실 미리보기입니다.*
+![배포된 연어버스 UT Agent의 첫 화면과 참가자 선택 폼](docs/ut-agent-home.png)
 
 ## 웹에서 사용하기
 
