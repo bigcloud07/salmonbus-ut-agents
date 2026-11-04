@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 export const modelId = "gpt-6-luna";
 
 export function objectSchema(properties) {
@@ -20,14 +22,43 @@ export function createModel(key = process.env.OPENAI_API_KEY) {
   if (!key?.trim()) throw new Error("OPENAI_API_KEY를 환경 변수 또는 .env에 설정해 주세요.");
 
   async function request(path, { body, signal, timeout = 45_000 } = {}) {
-    const response = await fetch(`https://api.openai.com/v1/${path}`, {
+    const timeoutSignal = AbortSignal.timeout(timeout);
+    const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    const options = {
       method: body ? "POST" : "GET",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
-    });
-    if (!response.ok) throw new Error(`OpenAI ${path} 요청 실패 (HTTP ${response.status})`);
-    return response.json();
+      signal: requestSignal,
+    };
+    for (let attempt = 0; ; attempt += 1) {
+      requestSignal.throwIfAborted();
+      let response;
+      try {
+        response = await fetch(`https://api.openai.com/v1/${path}`, options);
+        if (response.ok) return await response.json();
+      } catch (error) {
+        if (attempt >= 2 || requestSignal.aborted || !(error instanceof TypeError)) throw error;
+        await delay(200 * 2 ** attempt, undefined, { signal: requestSignal });
+        continue;
+      }
+      const failure = new Error(`OpenAI ${path} 요청 실패 (HTTP ${response.status})`);
+      if (attempt >= 2 || (response.status !== 429 && response.status < 500)) {
+        await response.body?.cancel().catch(() => {});
+        throw failure;
+      }
+      if (response.status === 429) {
+        const body = await response.json().catch(() => ({}));
+        if (body?.error?.code === "insufficient_quota") throw failure;
+      } else {
+        await response.body?.cancel().catch(() => {});
+      }
+      const header = response.headers.get("Retry-After");
+      const retryAfter = header === null ? NaN : /^\d+$/.test(header)
+        ? Number(header) * 1000 : Date.parse(header) - Date.now();
+      const backoff = Number.isFinite(retryAfter) ? Math.max(0, retryAfter) : 200 * 2 ** attempt;
+      if (backoff >= timeout) throw failure;
+      await delay(backoff, undefined, { signal: requestSignal });
+    }
   }
 
   return {

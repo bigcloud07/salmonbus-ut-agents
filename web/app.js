@@ -122,7 +122,7 @@ function eventText(event) {
     case "action_result": return ["조작 결과", event.result];
     case "auth": return ["인증", statuses[event.status] ?? event.status];
     case "end": return ["단계 종료", statuses[event.status] ?? event.status];
-    case "error": return ["실행 오류", event.message];
+    case "error": return [{ model: "모델 오류", browser: "브라우저 오류" }[event.source] ?? "실행 오류", event.message];
     default: return ["응답 오류", event.message];
   }
 }

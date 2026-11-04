@@ -4,7 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import MarkdownIt from "markdown-it";
 import { createModel } from "./model.js";
-import { launchStudy, openInterview, regenerateReport } from "./run.js";
+import { launchStudy, openInterview, parseEvents, regenerateReport } from "./run.js";
 import { personaNames, personas } from "./study.js";
 
 const runId = "[\\w-]+";
@@ -49,13 +49,6 @@ async function readOptional(path, encoding) {
     if (error.code !== "ENOENT") throw error;
     return null;
   }
-}
-
-function parseEvents(log) {
-  const lines = log.split("\n");
-  // The poll may overlap with an append. The next poll will pick up a partial line.
-  lines.pop();
-  return lines.filter(Boolean).map(line => JSON.parse(line));
 }
 
 async function readRequest(request) {
