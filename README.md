@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>연어 UT 에이전트</h1>
+  <h1>연어버스 UT Agent</h1>
   <p>네 명의 AI 페르소나가 연어를 사용하고, 웹 관찰실에서 화면과 행동을 기록합니다.</p>
   <p>
     <a href="https://salmonbus-ut-agents.vercel.app/"><strong>웹 관찰실 열기</strong></a>
@@ -10,7 +10,7 @@
   </p>
 </div>
 
-![연어 UT 관찰실의 medium과 low 리포트 비교 화면](docs/ut-viewer.png)
+![연어버스 UT Agent의 medium과 low 리포트 비교 화면](docs/ut-viewer.png)
 
 ## 웹에서 사용하기
 

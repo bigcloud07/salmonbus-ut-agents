@@ -3,20 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>연어 UT 관찰실</title>
+  <title>연어버스 UT Agent</title>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
   <header class="top">
-    <div class="brand"><span class="mark" aria-hidden="true">↗</span> 연어 <span>UT 관찰실</span></div>
+    <a class="brand" href="#title">연어버스 <em>UT</em></a>
+    <nav class="top-nav" aria-label="관찰실 바로가기">
+      <a href="#launch-form">새 테스트</a>
+      <a href="#runs-heading">실행 기록</a>
+    </nav>
     <span class="sync" id="sync" role="status">기록 확인 중</span>
   </header>
   <main>
     <section class="overview" aria-labelledby="title">
       <div class="intro">
         <p class="eyebrow">SALMONBUS / USABILITY TEST</p>
-        <h1 id="title">연어 UT 관찰실</h1>
+        <h1 id="title">연어버스 <em>UT Agent</em></h1>
         <p>페르소나가 본 화면과 그 순간의 발언을 함께 살펴보세요.</p>
       </div>
       <form class="surface launch" id="launch-form" aria-labelledby="launch-title">
@@ -41,7 +45,7 @@
     </section>
     <div class="workspace">
       <aside class="surface runs">
-        <h2>실행 목록</h2>
+        <h2 id="runs-heading">실행 목록</h2>
         <div id="runs"></div>
       </aside>
       <section class="surface empty" id="empty">
