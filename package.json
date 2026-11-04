@@ -11,6 +11,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@vercel/sandbox": "3.9.1",
     "markdown-it": "15.0.3",
     "playwright": "1.63.0"
   }

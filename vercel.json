@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/", "destination": "/api/host?ut_path=/" },
+    { "source": "/:path*", "destination": "/api/host?ut_path=:path*" }
+  ],
+  "functions": {
+    "api/host.js": {
+      "maxDuration": 300,
+      "includeFiles": "{viewer.js,run.js,study.js,model.js,browser.js,package.json,package-lock.json,data/**,web/**}"
+    }
+  }
+}

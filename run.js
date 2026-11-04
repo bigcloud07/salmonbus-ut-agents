@@ -304,7 +304,7 @@ export async function regenerateReport({ model, runId, root = "runs", effort = "
 
 export async function launchStudy(options) {
   await options.model.check();
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: Boolean(process.env.UT_SANDBOX_PROXY_KEY) });
   try {
     return await runStudy({ ...options, browser });
   } finally {

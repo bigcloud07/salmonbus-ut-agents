@@ -67,7 +67,7 @@ async function post(path, fields) {
 function renderLaunch() {
   for (const option of $("run-persona").options) {
     if (option.value === "all") continue;
-    const label = personaName(option.value) + (option.value === "P1" ? " · 파일럿" : "");
+    const label = personaName(option.value);
     if (option.textContent !== label) option.textContent = label;
   }
   $("key-field").hidden = Boolean(control.hasKey);

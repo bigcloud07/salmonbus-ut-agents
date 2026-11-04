@@ -78,7 +78,7 @@ function message(error) {
   return error.message.split("\n")[0].slice(0, 220);
 }
 
-export function createViewer({ root = "runs", makeModel = createModel, startStudy = launchStudy } = {}) {
+export function createViewer({ root = "runs", makeModel = createModel, startStudy = launchStudy, proxyKey } = {}) {
   const runs = resolve(root);
   let study = { state: "idle", id: null };
   let nextJob = 0;
@@ -109,12 +109,15 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
     };
     const json = (status, body) => send(status, "application/json; charset=utf-8", JSON.stringify(body));
     try {
-      if (!/^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(request.headers.host ?? "")) {
+      const allowed = proxyKey
+        ? request.headers["x-ut-proxy-key"] === proxyKey
+        : /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(request.headers.host ?? "");
+      if (!allowed) {
         return json(403, { error: "로컬 주소에서 열어 주세요." });
       }
       const path = request.url.split("?")[0];
       if (request.method === "POST") {
-        if (request.headers.origin !== `http://${request.headers.host}`
+        if ((!proxyKey && request.headers.origin !== `http://${request.headers.host}`)
           || request.headers["content-type"] !== "application/json") {
           return json(403, { error: "관찰실 페이지에서 다시 시도해 주세요." });
         }
@@ -237,5 +240,7 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  createViewer().listen(4310, "127.0.0.1", () => console.log("연어 UT 뷰어 · http://127.0.0.1:4310"));
+  const proxyKey = process.env.UT_SANDBOX_PROXY_KEY;
+  createViewer({ proxyKey }).listen(4310, proxyKey ? "0.0.0.0" : "127.0.0.1",
+    () => console.log("연어 UT 뷰어 · http://127.0.0.1:4310"));
 }
