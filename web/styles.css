@@ -122,6 +122,12 @@ button:not(:disabled):hover { border-color: #ce8880; }
 .utterance:first-of-type { margin-top: 12px; }
 .utterance h4 { margin-top: 6px; font-size: .92rem; }
 .records pre { font-size: .83rem; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f1ed; border-radius: 10px; padding: 14px; line-height: 1.6; }
+.review-controls { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.review-controls button:not(.primary) { color: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 7px 10px; font-size: .84rem; }
+.report-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.report-panel { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.report-panel h4 { margin-bottom: 8px; }
+.report-panel pre { max-height: 65vh; overflow: auto; margin-bottom: 0; }
 
 @media (max-width: 860px) {
   .workspace { grid-template-columns: 170px minmax(0, 1fr); }
@@ -133,4 +139,5 @@ button:not(:disabled):hover { border-color: #ce8880; }
   .workspace { grid-template-columns: minmax(0, 1fr); }
   #runs { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
   .preview, .timeline, .records, .runs { padding: 14px; }
+  .report-comparison { grid-template-columns: 1fr; }
 }

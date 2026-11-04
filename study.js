@@ -8,6 +8,7 @@ export const dataset = {
 export const personas = [
   {
     id: "P1",
+    name: "강정식",
     source: { row: 1465, uuid: "a7914ba2552245438463da9ecbe34189" },
     background: "32세, 성남 분당구, 시스템 소프트웨어 설계 및 분석가.",
     commute: "주 5회 9007번을 운중동행정복지센터에서 서울역 방면으로 탄다. 노선에 익숙하다.",
@@ -15,6 +16,7 @@ export const personas = [
   },
   {
     id: "P2",
+    name: "천상민",
     source: { row: 451, uuid: "898535680bcd462a811f546294906d72" },
     background: "44세, 성남 중원구, 통계 사무원.",
     commute: "주 2회 9300번을 도촌동9단지앞에서 서울역 방면으로 탄다. 좌석 가능성에 따라 출발 시각을 조정한다.",
@@ -22,12 +24,15 @@ export const personas = [
   },
   {
     id: "P3",
+    name: "정미란",
     source: { row: 411, uuid: "7c939ddbe8ff4133a7d92fc183d92e78" },
     background: "47세, 하남시, 예체능 교사.",
     commute: "주 3회 3000번을 미사역호반써밋에서 판교 방면으로 타기 시작했다. 정류장과 방면을 다시 확인하는 편이다.",
     target: { route: "3000", routeId: "227000038", stop: "미사역호반써밋", stopId: "227000293", direction: "UP", destination: "판교 방면" },
   },
 ];
+
+export const personaNames = Object.fromEntries(personas.map(({ id, name }) => [id, name]));
 
 export function tasksFor({ target }) {
   const commute = `${target.stop}에서 ${target.destination}으로 가는 ${target.route}번`;
@@ -38,7 +43,7 @@ export function tasksFor({ target }) {
 }
 
 export function participantPrompt(persona) {
-  return `당신은 처음 보는 서비스를 쓰는 참가자 ${persona.id}입니다.
+  return `당신은 처음 보는 서비스를 쓰는 ${persona.name ?? personaNames[persona.id] ?? persona.id}(참가자 ${persona.id})입니다.
 배경: ${persona.background}
 평소 통근: ${persona.commute}
 한국어로 사용자 관점에서 답하세요. 화면과 실제로 겪은 일을 근거로 말하세요.

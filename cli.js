@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { createModel } from "./model.js";
-import { launchStudy, openInterview } from "./run.js";
+import { launchStudy, openInterview, regenerateReport } from "./run.js";
 import { personas } from "./study.js";
 
 async function main([command, ...args]) {
@@ -23,7 +23,11 @@ async function main([command, ...args]) {
     }
     return;
   }
-  console.log("npm run ut -- run [--persona P1]\nnpm run ut -- interview <run-id> <persona-id>");
+  if (command === "report" && (args.length === 1 || (args.length === 3 && args[1] === "--effort"))) {
+    console.log(`재분석 결과 · ${await regenerateReport({ model: createModel(), runId: args[0], effort: args[2] })}`);
+    return;
+  }
+  console.log("npm run ut -- run [--persona P1]\nnpm run ut -- interview <run-id> <persona-id>\nnpm run ut -- report <run-id> [--effort low|medium]");
   if (command && command !== "--help") process.exitCode = 1;
 }
 

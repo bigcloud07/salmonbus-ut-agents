@@ -22,6 +22,11 @@ let starting = false;
 let launchError = "";
 let followJob;
 let asking = false;
+let reviewing = false;
+
+function personaName(id) {
+  return control.personaNames?.[id] ?? id;
+}
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -60,6 +65,11 @@ async function post(path, fields) {
 }
 
 function renderLaunch() {
+  for (const option of $("run-persona").options) {
+    if (option.value === "all") continue;
+    const label = personaName(option.value) + (option.value === "P1" ? " · 파일럿" : "");
+    if (option.textContent !== label) option.textContent = label;
+  }
   $("key-field").hidden = Boolean(control.hasKey);
   const waiting = starting || (followJob !== undefined && control.job !== followJob);
   $("launch-button").disabled = waiting || control.state === "running";
@@ -78,7 +88,7 @@ function renderRuns() {
     button.type = "button";
     button.dataset.run = id;
     button.setAttribute("aria-pressed", String(id === selected));
-    button.append(el("strong", runDate(id)), el("small", people.join(" · ")));
+    button.append(el("strong", runDate(id)), el("small", people.map(personaName).join(" · ")));
     return button;
   }));
   if (!runList.length) $("runs").append(el("p", "저장된 실행이 없습니다.", "muted"));
@@ -93,6 +103,7 @@ function chooseRun(id) {
   detailVersion = undefined;
   $("interview-form").reset();
   $("interview-feedback").textContent = "";
+  $("review-feedback").textContent = "";
 }
 
 function captureUrl(frame) {
@@ -124,11 +135,11 @@ function renderActivity() {
   $("screen").classList.toggle("has-image", Boolean(current));
   $("follow").disabled = !current || !pinnedFrame;
   $("frame-info").textContent = current
-    ? `${current.persona} · ${tasks[current.task] ?? current.task} · ${current.frame}`
+    ? `${personaName(current.persona)} · ${tasks[current.task] ?? current.task} · ${current.frame}`
     : "아직 캡처가 없습니다.";
   if (current) {
     const url = captureUrl(current.frame);
-    image.alt = `${current.persona}의 ${tasks[current.task]} 화면 ${current.frame}`;
+    image.alt = `${personaName(current.persona)}의 ${tasks[current.task]} 화면 ${current.frame}`;
     if (image.getAttribute("src") !== url) image.src = url;
   } else {
     image.removeAttribute("src");
@@ -148,7 +159,7 @@ function renderActivity() {
       node.setAttribute("aria-pressed", String(event.frame === current?.frame));
     }
     const [label, remark] = eventText(event);
-    const meta = [event.persona, tasks[event.task], event.at ? clock.format(new Date(event.at)) : ""].filter(Boolean).join(" · ");
+    const meta = [personaName(event.persona), tasks[event.task], event.at ? clock.format(new Date(event.at)) : ""].filter(Boolean).join(" · ");
     node.append(el("small", meta), el("strong", label));
     if (remark) node.append(el("p", remark));
     entry.append(node);
@@ -163,31 +174,68 @@ function renderRecords() {
   const discussion = details.events.filter(event => event.kind === "discussion");
   $("interview-records").replaceChildren(...interviews.map(event => {
     const card = el("article", undefined, "utterance");
-    card.append(el("small", event.persona), el("h4", event.question), el("p", event.answer));
+    card.append(el("small", personaName(event.persona)), el("h4", event.question), el("p", event.answer));
     return card;
   }));
   if (!interviews.length) $("interview-records").append(el("p", "아직 인터뷰 기록이 없습니다.", "muted"));
 
   $("discussion").replaceChildren(el("h3", "그룹 대화"), ...discussion.map(event => {
     const card = el("article", undefined, "utterance");
-    card.append(el("small", `${event.round}차 · ${event.persona}`), el("p", event.speech));
+    card.append(el("small", `${event.round}차 · ${personaName(event.persona)}`), el("p", event.speech));
     return card;
   }));
   if (!discussion.length) {
     $("discussion").append(el("p", details.run.people.length === 1
-      ? "P1과 같은 단일 참가자 실행에는 개별 인터뷰가 기록됩니다."
+      ? "참가자가 한 명이면 개별 인터뷰가 기록됩니다."
       : "아직 그룹 대화 기록이 없습니다.", "muted"));
   }
 
-  $("report").replaceChildren(el("h3", "UT 리포트"));
+  renderReports();
+}
+
+function updateReviewButtons() {
+  for (const button of $("review-controls").querySelectorAll("button")) {
+    button.disabled = reviewing || !details || details.report === null;
+  }
+}
+
+function renderReports() {
+  const records = $("report-records");
+  records.replaceChildren();
+  updateReviewButtons();
   if (details.report === null) {
-    $("report").append(el("p", "리포트가 생성되면 여기에 표시됩니다.", "muted"));
+    records.append(el("p", "리포트가 생성되면 여기에 표시됩니다.", "muted"));
     return;
   }
-  const download = el("a", "Markdown 다운로드");
-  download.href = `/api/runs/${encodeURIComponent(selected)}/report.md`;
-  download.download = "report.md";
-  $("report").append(download, el("pre", details.report));
+  const reportContents = (file, contents) => {
+    const download = el("a", "Markdown 다운로드");
+    download.href = `/api/runs/${encodeURIComponent(selected)}/${file}`;
+    download.download = file;
+    return [download, el("pre", contents)];
+  };
+  const defaultIsMedium = details.report.includes("\n관찰자 추론 정도 · medium\n");
+  const medium = details.reviewReport ?? (defaultIsMedium ? details.report : null);
+  const comparison = el("div", undefined, "report-comparison");
+  for (const [effort, contents, file] of [
+    ["medium", medium, details.reviewReport ? "report-medium.md" : "report.md"],
+    ["low", details.lowReport, "report-low.md"],
+  ]) {
+    const panel = el("section", undefined, "report-panel");
+    const title = el("h4", `${effort} 리포트`);
+    title.id = `report-title-${effort}`;
+    panel.setAttribute("aria-labelledby", title.id);
+    panel.append(title);
+    if (contents) panel.append(...reportContents(file, contents));
+    else panel.append(el("p", `${effort}로 재분석하면 여기에 표시됩니다.`, "muted"));
+    comparison.append(panel);
+  }
+  records.append(comparison);
+  if (!defaultIsMedium || details.reviewReport) {
+    const original = el("details");
+    original.open = !medium && !details.lowReport;
+    original.append(el("summary", "이전 리포트 보기"), ...reportContents("report.md", details.report));
+    records.append(original);
+  }
 }
 
 function renderDetail() {
@@ -197,17 +245,17 @@ function renderDetail() {
 
   const { run, report } = details;
   $("run-title").textContent = runDate(run.id);
-  $("run-info").textContent = `${run.people.map(person => person.id).join(" · ")} / ${run.model}`;
+  $("run-info").textContent = `${run.people.map(person => personaName(person.id)).join(" · ")} / ${run.model}`;
   $("run-status").textContent = report === null ? "리포트 대기" : "리포트 준비됨";
   const select = $("participant");
   const ids = run.people.map(person => person.id);
   if ([...select.options].slice(1).map(option => option.value).join() !== ids.join()) {
-    select.replaceChildren(new Option("전체", ""), ...ids.map(id => new Option(id, id)));
+    select.replaceChildren(new Option("전체", ""), ...ids.map(id => new Option(personaName(id), id)));
   }
   select.value = participant;
   const interviewSelect = $("interview-persona");
   if ([...interviewSelect.options].map(option => option.value).join() !== ids.join()) {
-    interviewSelect.replaceChildren(...ids.map(id => new Option(id, id)));
+    interviewSelect.replaceChildren(...ids.map(id => new Option(personaName(id), id)));
   }
   $("interview-button").disabled = asking || report === null;
   const feedback = $("interview-feedback");
@@ -298,6 +346,28 @@ $("interview-form").addEventListener("submit", async event => {
   } finally {
     asking = false;
     $("interview-button").disabled = !details || details.report === null;
+  }
+});
+$("review-controls").addEventListener("click", async event => {
+  const button = event.target.closest("button[data-review]");
+  if (!selected || !button || button.disabled) return;
+  const effort = button.dataset.review;
+  const id = selected;
+  const feedback = $("review-feedback");
+  reviewing = true;
+  updateReviewButtons();
+  feedback.textContent = `${effort}로 화면과 인터뷰를 다시 살펴보고 있습니다.`;
+  try {
+    await post(`/api/runs/${encodeURIComponent(id)}/review`, { effort });
+    if (selected === id) {
+      feedback.textContent = `${effort} 리포트를 저장했습니다.`;
+      loadDetail(id).catch(() => setSync(false));
+    }
+  } catch (error) {
+    if (selected === id) feedback.textContent = error.message;
+  } finally {
+    reviewing = false;
+    updateReviewButtons();
   }
 });
 

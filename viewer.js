@@ -3,14 +3,15 @@ import { readFile, readdir, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createModel } from "./model.js";
-import { launchStudy, openInterview } from "./run.js";
-import { personas } from "./study.js";
+import { launchStudy, openInterview, regenerateReport } from "./run.js";
+import { personaNames, personas } from "./study.js";
 
 const runId = "[\\w-]+";
 const frameId = "P[123]-(?:free|arrival|return)-\\d{2}";
 const runPath = new RegExp(`^/api/runs/(${runId})$`);
 const interviewPath = new RegExp(`^/api/runs/(${runId})/interview$`);
-const assetPath = new RegExp(`^/api/runs/(${runId})/(report\\.md|screens/${frameId}\\.png)$`);
+const reviewPath = new RegExp(`^/api/runs/(${runId})/review$`);
+const assetPath = new RegExp(`^/api/runs/(${runId})/(report(?:-low|-medium)?\\.md|screens/${frameId}\\.png)$`);
 const files = {
   "/": ["index.html", "text/html; charset=utf-8"],
   "/app.js": ["app.js", "text/javascript; charset=utf-8"],
@@ -58,6 +59,7 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
   let study = { state: "idle", id: null };
   let nextJob = 0;
   const interviews = new Set();
+  const reviews = new Set();
   const readRun = async (id, file, encoding) => {
     try {
       const path = await realpath(join(runs, id, file));
@@ -93,7 +95,8 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
           return json(403, { error: "관찰실 페이지에서 다시 시도해 주세요." });
         }
         const interview = path.match(interviewPath);
-        if (path !== "/api/runs" && !interview) return json(404, { error: "지원하지 않는 요청입니다." });
+        const review = path.match(reviewPath);
+        if (path !== "/api/runs" && !interview && !review) return json(404, { error: "지원하지 않는 요청입니다." });
         const input = await readRequest(request);
         if (!input || (input.key !== undefined && (typeof input.key !== "string" || input.key.length > 512))) {
           return json(400, { error: "입력값을 확인해 주세요." });
@@ -120,6 +123,22 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
             }
           })();
           return json(202, { job: study.job });
+        }
+
+        if (review) {
+          const [, id] = review;
+          if (!await readRun(id, "run.json", "utf8")) return json(404, { error: "실행 기록을 찾을 수 없습니다." });
+          if (!await readRun(id, "report.md", "utf8")) return json(409, { error: "실행이 끝난 뒤 재분석할 수 있습니다." });
+          if (reviews.has(id)) return json(409, { error: "이 실행을 이미 재분석하고 있습니다." });
+          reviews.add(id);
+          try {
+            await regenerateReport({ model: makeModel(key), runId: id, root: runs, effort: input.effort });
+            return json(200, { ok: true });
+          } catch (error) {
+            return json(400, { error: message(error) });
+          } finally {
+            reviews.delete(id);
+          }
         }
 
         const [, id] = interview;
@@ -163,14 +182,16 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
         }));
         return json(200, records.filter(Boolean));
       }
-      if (path === "/api/control") return json(200, { ...study, hasKey: Boolean(process.env.OPENAI_API_KEY?.trim()) });
+      if (path === "/api/control") {
+        return json(200, { ...study, hasKey: Boolean(process.env.OPENAI_API_KEY?.trim()), personaNames });
+      }
       const run = path.match(runPath);
       if (run) {
         const [, id] = run;
-        const [metadata, log, report] = await Promise.all(
-          ["run.json", "events.jsonl", "report.md"].map(file => readRun(id, file, "utf8")),
+        const [metadata, log, report, reviewReport, lowReport] = await Promise.all(
+          ["run.json", "events.jsonl", "report.md", "report-medium.md", "report-low.md"].map(file => readRun(id, file, "utf8")),
         );
-        if (metadata) return json(200, { run: JSON.parse(metadata), events: parseEvents(log ?? ""), report });
+        if (metadata) return json(200, { run: JSON.parse(metadata), events: parseEvents(log ?? ""), report, reviewReport, lowReport });
       }
       const asset = path.match(assetPath);
       if (asset) {

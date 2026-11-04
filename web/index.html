@@ -25,7 +25,7 @@
             <option value="P1">P1 · 파일럿</option>
             <option value="P2">P2</option>
             <option value="P3">P3</option>
-            <option value="all">전체 · P1, P2, P3</option>
+            <option value="all">전체 참가자</option>
           </select>
         </label>
         <label id="key-field">OpenAI API 키
@@ -82,7 +82,17 @@
           <div id="interview-records"></div>
         </section>
         <section id="discussion" class="surface records" aria-label="그룹 대화" hidden></section>
-        <section id="report" class="surface records" aria-label="리포트" hidden></section>
+        <section id="report" class="surface records" aria-labelledby="report-title" hidden>
+          <div class="section-head">
+            <h3 id="report-title">UT 리포트 비교</h3>
+            <div id="review-controls" class="review-controls">
+              <button type="button" class="primary" data-review="medium">medium으로 재분석</button>
+              <button type="button" data-review="low">low로 재분석</button>
+            </div>
+          </div>
+          <p class="muted feedback" id="review-feedback" role="status"></p>
+          <div id="report-records"></div>
+        </section>
       </section>
     </div>
   </main>

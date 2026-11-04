@@ -19,12 +19,12 @@ export const speechSchema = objectSchema({ speech: string });
 export function createModel(key = process.env.OPENAI_API_KEY) {
   if (!key?.trim()) throw new Error("OPENAI_API_KEY를 환경 변수 또는 .env에 설정해 주세요.");
 
-  async function request(path, { body, signal } = {}) {
+  async function request(path, { body, signal, timeout = 45_000 } = {}) {
     const response = await fetch(`https://api.openai.com/v1/${path}`, {
       method: body ? "POST" : "GET",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
     });
     if (!response.ok) throw new Error(`OpenAI ${path} 요청 실패 (HTTP ${response.status})`);
     return response.json();
@@ -35,15 +35,21 @@ export function createModel(key = process.env.OPENAI_API_KEY) {
       const model = await request(`models/${modelId}`);
       if (model.id !== modelId) throw new Error(`API에서 ${modelId} 접근을 확인할 수 없습니다.`);
     },
-    async respond({ instructions, prompt, image, schema = speechSchema, signal, maxOutput = 1000 }) {
+    async respond({ instructions, prompt, image, images = [], schema = speechSchema, signal, maxOutput = 1000, effort = "low", timeout }) {
       const content = [{ type: "input_text", text: prompt }];
       if (image) content.push({
         type: "input_image", detail: "high", image_url: `data:image/png;base64,${image.toString("base64")}`,
       });
+      for (const { frame, image } of images) {
+        content.push({ type: "input_text", text: `화면 ID: ${frame}` }, {
+          type: "input_image", detail: "high", image_url: `data:image/png;base64,${image.toString("base64")}`,
+        });
+      }
       const response = await request("responses", {
         signal,
+        timeout,
         body: {
-          model: modelId, store: false, reasoning: { effort: "low" }, max_output_tokens: maxOutput,
+          model: modelId, store: false, reasoning: { effort }, max_output_tokens: maxOutput,
           instructions, input: [{ role: "user", content }],
           text: { format: { name: "ut_response", type: "json_schema", strict: true, schema } },
         },

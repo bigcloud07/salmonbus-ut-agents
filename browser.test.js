@@ -146,7 +146,7 @@ test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추
   assert.ok(discussion.every(({ payload, instructions }) => payload.experience.every(event => !event.frame || instructions.includes(event.frame.slice(0, 2)))));
   const report = await readFile(join(directory, "report.md"), "utf8");
   assert.match(report, /달성 \| 다른 동선/);
-  assert.match(report, /P1 \| 다시 찾기 \| 인증 미실행/);
+  assert.match(report, /강정식 \| 다시 찾기 \| 인증 미실행/);
   assert.match(report, /P1-free-01\.png/);
   assert.doesNotMatch(report, /fabricated-frame/);
 
@@ -154,5 +154,5 @@ test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추
   await interview.ask(model, "P1-arrival-01에서 무엇을 기대했나요?");
   assert.equal(prompts.at(-1).hasImage, true);
   assert.equal(prompts.at(-1).payload.conversation.length, 1);
-  assert.match(await readFile(join(directory, "interviews.md"), "utf8"), /P1 추가 질문/);
+  assert.match(await readFile(join(directory, "interviews.md"), "utf8"), /강정식 추가 질문/);
 });

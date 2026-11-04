@@ -1,10 +1,10 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { openSession, production, validateAction, viewport } from "./browser.js";
 import { actionSchema, modelId, objectSchema } from "./model.js";
-import { dataset, participantPrompt, tasksFor } from "./study.js";
+import { dataset, participantPrompt, personaNames, tasksFor } from "./study.js";
 
 const actionInstructions = `지금 보이는 화면에서 다음 조작을 하나만 선택하세요.
 tap은 화면 왼쪽 위 (0,0) 기준 좌표, input은 초점이 있는 입력란에 넣을 문자열과 submit 여부,
@@ -170,7 +170,7 @@ async function debrief({ model, people, events, record, directory }) {
             ? "다른 참가자들에게 사용 중 기억에 남은 장면을 이야기해 주세요. 앞선 발언과 경험이 겹치면 그 점도 말해 주세요."
             : "앞선 참가자의 경험 중 공감하거나 달랐던 점에 직접 답해 주세요.",
         });
-        conversation.push({ persona: persona.id, speech });
+        conversation.push({ persona: persona.name ?? personaNames[persona.id] ?? persona.id, speech });
         await record({ kind: "discussion", persona: persona.id, round, speech });
         console.log(`[대화 ${round} · ${persona.id}] ${speech}`);
       } catch (error) {
@@ -180,13 +180,32 @@ async function debrief({ model, people, events, record, directory }) {
   }
 }
 
-async function writeReport({ model, people, events, directory, origin }) {
-  const frames = new Map(events.filter(event => event.kind === "frame").map(event => [event.frame, event]));
+function reviewEvidence(events, frames) {
+  const nextFrames = new Map();
+  let previous;
+  for (const frame of frames.values()) {
+    if (previous && previous.persona === frame.persona && previous.task === frame.task) nextFrames.set(previous.frame, frame.frame);
+    previous = frame;
+  }
+  return events.filter(event => ["frame", "action", "action_result", "auth", "end", "error", "interview"].includes(event.kind))
+    .map(event => event.kind === "action" ? {
+      ...event,
+      before: event.frame,
+      after: event.action.action === "stop" ? null : nextFrames.get(event.frame) ?? null,
+    } : event);
+}
+
+async function writeReport({ model, people, events, directory, origin, file = "report.md", effort = "medium" }) {
+  const frames = new Map(events.filter(event => event.kind === "frame" && /^P[123]-(free|arrival|return)-\d{2}$/.test(event.frame))
+    .map(event => [event.frame, event]));
   const links = (ids) => [...new Set(ids)].filter(id => frames.has(id)).map(id => `[${id}](${frames.get(id).image})`).join(", ");
   let review = { assessments: [], findings: [] };
   let reviewError;
   if (frames.size) {
     try {
+      const images = await Promise.all([...frames.keys()].map(async frame => ({
+        frame, image: await readFile(join(directory, "screens", frame + ".png")),
+      })));
       review = await model.respond({
         instructions: `당신은 사용성 테스트 관찰자입니다. 제공된 기록만 증거로 사용하세요.
 참가자별 arrival과 return 각각 한 건을 판정하고, 주요 발견은 최대 3건만 작성하세요.
@@ -194,37 +213,47 @@ async function writeReport({ model, people, events, directory, origin }) {
 화면에서 목표를 달성했다면 동선이 달라도 success로 판정하세요. 둘 중 한 정보만 확인했으면 partial입니다.
 화면에서 서비스가 예보를 제공하지 않았으면 unavailable로 기록하세요. 참가자가 정보를 찾지 못한 상황과 구분하세요.
 인증 단계는 운영 비회원 테스트에서 미실행입니다. 실행 오류나 제한에 걸린 경우 기록을 근거로 판단을 보류할 수 있습니다.
-판정과 발견에 관련 화면 ID를 붙이세요. 관찰 사실은 해석과 분리하세요. 참가자 발언만으로 완료를 확정하지 마세요.
+반복 조작, 기대와 실제 화면의 차이, 되돌아가기와 우회 행동을 우선 살피세요. 앞뒤 화면과 인터뷰를 대조해 어떤 장면에서 무엇이 바뀌었는지, 참가자가 어떻게 대응했는지 적으세요.
+인터뷰는 참가자의 해석입니다. 화면과 행동으로 확인한 사실을 구분하고, 자료로 구분할 수 없는 UI 문제, 모델 조작 실수, 예보 부재는 가설로 남기세요.
+after가 null이면 해당 행동 뒤 화면이 기록되지 않았습니다. 판정과 발견의 evidence에는 관련 화면 ID를 하나씩 정확히 적으세요. 범위나 접두어는 사용하지 마세요. 과업 판정의 근거는 그 참가자의 같은 과업 화면에서 고르세요.
 기록에 없는 조작이나 결과를 추가하지 마세요.`,
         prompt: JSON.stringify({
           targets: people.map(({ id, target }) => ({ id, target })),
-          evidence: events.filter(event => ["frame", "action", "auth", "end", "error"].includes(event.kind)),
+          evidence: reviewEvidence(events, frames),
         }),
+        images,
         schema: reviewSchema,
-        maxOutput: 3200,
+        effort,
+        timeout: 240_000,
+        maxOutput: 6000,
       });
     } catch (error) {
+      if (file !== "report.md") throw error;
       reviewError = clean(error.message);
     }
+  } else if (file !== "report.md") {
+    throw new Error("재분석할 화면 기록이 없습니다.");
   }
 
   const lines = [
     "# 연어 UT 결과",
     "",
     `비회원 · ${origin} · ${modelId}`,
+    `관찰자 추론 정도 · ${effort}`,
     "",
     "## 자유 탐색",
     "",
   ];
   for (const { id } of people) {
+    const name = personaNames[id] ?? id;
     const entries = events.filter(event => event.persona === id && event.phase === "free");
     const first = entries.find(event => event.kind === "action");
     const last = entries.findLast(event => event.kind === "action");
     const locations = new Map(entries.filter(event => event.kind === "frame").map(event => [event.path.split("?")[0], event.frame]));
     const backs = entries.filter(event => event.action?.action === "back");
     lines.push(first
-      ? `- ${id} 첫 행동 \`${first.action.action}\` ${markdown(first.remark)} ${links([first.frame])} / 마지막 발언 ${markdown(last.remark)} ${links([last.frame])}`
-      : `- ${id} 관찰 기록 없음`);
+      ? `- ${name} 첫 행동 \`${first.action.action}\` ${markdown(first.remark)} ${links([first.frame])} / 마지막 발언 ${markdown(last.remark)} ${links([last.frame])}`
+      : `- ${name} 관찰 기록 없음`);
     if (locations.size) lines.push(`  확인된 화면 · ${[...locations.keys()].map(markdown).join(", ")} ${links([...locations.values()])}`);
     if (backs.length) lines.push(`  뒤로 가기 ${backs.length}회 ${links(backs.map(event => event.frame))}`);
   }
@@ -238,7 +267,7 @@ async function writeReport({ model, people, events, directory, origin }) {
       const evaluated = evidence.length > 0 ? assessment : undefined;
       const status = outcome[end?.status] ?? outcome[evaluated?.outcome] ?? outcome.uncertain;
       const last = events.findLast(event => event.kind === "frame" && event.persona === persona.id && event.task === id);
-      lines.push(`| ${persona.id} | ${label} | ${status} | ${flow[evaluated?.flow] ?? flow.unknown} | ${markdown(evaluated?.note ?? "")} ${links(evidence.length ? evidence : [last?.frame])} |`);
+      lines.push(`| ${personaNames[persona.id] ?? persona.id} | ${label} | ${status} | ${flow[evaluated?.flow] ?? flow.unknown} | ${markdown(evaluated?.note ?? "")} ${links(evidence.length ? evidence : [last?.frame])} |`);
     }
   }
   lines.push("", "## 주요 관찰", "");
@@ -249,7 +278,28 @@ async function writeReport({ model, people, events, directory, origin }) {
     lines.push(`- 관찰 · ${markdown(finding.observed)} ${links(finding.evidence)}\n  해석 · ${markdown(finding.interpretation)}`);
   }
   lines.push("", "## 인터뷰와 그룹 대화", "", "[개별 인터뷰](interviews.md) · [그룹 대화](discussion.md) · [전체 행동 로그](events.jsonl)", "", "합성 참가자의 관찰은 실제 사용자 UT에서 확인할 가설입니다.", "");
-  await writeFile(join(directory, "report.md"), lines.join("\n"));
+  const temporary = join(directory, `.${file}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, lines.join("\n"));
+    await rename(temporary, join(directory, file));
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+export async function regenerateReport({ model, runId, root = "runs", effort = "medium" }) {
+  if (!/^[\w-]+$/.test(runId)) throw new Error("올바른 실행 ID를 입력해 주세요.");
+  if (!["low", "medium"].includes(effort)) throw new Error("관찰자 추론 정도는 low 또는 medium을 선택해 주세요.");
+  const directory = join(root, runId);
+  const [run, log] = await Promise.all([
+    readFile(join(directory, "run.json"), "utf8"),
+    readFile(join(directory, "events.jsonl"), "utf8"),
+  ]);
+  const { people, origin } = JSON.parse(run);
+  const events = log.trimEnd().split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const file = `report-${effort}.md`;
+  await writeReport({ model, people, events, directory, origin, file, effort });
+  return join(directory, file);
 }
 
 export async function launchStudy(options) {
@@ -273,10 +323,10 @@ export async function runStudy({ model, browser, people, root = "runs", origin =
     await appendFile(join(directory, "events.jsonl"), JSON.stringify(entry) + "\n");
     events.push(entry);
     if (event.kind === "interview") {
-      await appendFile(join(directory, "interviews.md"), `## ${event.persona}\n\n질문 · ${markdown(event.question)}\n\n답변 · ${markdown(event.answer)}\n\n`);
+      await appendFile(join(directory, "interviews.md"), `## ${personaNames[event.persona] ?? event.persona}\n\n질문 · ${markdown(event.question)}\n\n답변 · ${markdown(event.answer)}\n\n`);
     }
     if (event.kind === "discussion") {
-      await appendFile(join(directory, "discussion.md"), `- ${event.round}차 ${event.persona} · ${markdown(event.speech)}\n`);
+      await appendFile(join(directory, "discussion.md"), `- ${event.round}차 ${personaNames[event.persona] ?? event.persona} · ${markdown(event.speech)}\n`);
     }
   };
   await writeFile(join(directory, "interviews.md"), "# 개별 인터뷰\n\n");
@@ -335,7 +385,7 @@ export async function openInterview(runId, personaId, root = "runs") {
         ?? events.findLast(event => event.kind === "frame" && event.persona === personaId)?.frame;
       const answer = await askParticipant({ model, persona, events, conversation, question, directory, frame });
       await appendFile(join(directory, "events.jsonl"), JSON.stringify({ at: new Date().toISOString(), kind: "interview", persona: persona.id, question, answer }) + "\n");
-      await appendFile(join(directory, "interviews.md"), `## ${persona.id} 추가 질문\n\n질문 · ${markdown(question)}\n\n답변 · ${markdown(answer)}\n\n`);
+      await appendFile(join(directory, "interviews.md"), `## ${personaNames[persona.id] ?? persona.id} 추가 질문\n\n질문 · ${markdown(question)}\n\n답변 · ${markdown(answer)}\n\n`);
       return answer;
     },
   };
