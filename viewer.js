@@ -2,16 +2,40 @@ import { createServer } from "node:http";
 import { readFile, readdir, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import MarkdownIt from "markdown-it";
 import { createModel } from "./model.js";
 import { launchStudy, openInterview, regenerateReport } from "./run.js";
 import { personaNames, personas } from "./study.js";
 
 const runId = "[\\w-]+";
-const frameId = "P[123]-(?:free|arrival|return)-\\d{2}";
+const frameId = "P[1-4]-(?:free|arrival|return)-\\d{2}";
 const runPath = new RegExp(`^/api/runs/(${runId})$`);
 const interviewPath = new RegExp(`^/api/runs/(${runId})/interview$`);
 const reviewPath = new RegExp(`^/api/runs/(${runId})/review$`);
 const assetPath = new RegExp(`^/api/runs/(${runId})/(report(?:-low|-medium)?\\.md|screens/${frameId}\\.png)$`);
+const screenshotPath = new RegExp(`^screens/${frameId}\\.png$`);
+const reportTabs = new Map([["interviews.md", "#interviews"], ["discussion.md", "#discussion"], ["events.jsonl", "#activity"]]);
+const reportMarkdown = new MarkdownIt({ html: false, breaks: true });
+reportMarkdown.validateLink = url => screenshotPath.test(url) || reportTabs.has(url) || /^https?:\/\//i.test(url);
+reportMarkdown.renderer.rules.link_open = (tokens, index, options, { id }, renderer) => {
+  const token = tokens[index];
+  const href = token.attrGet("href");
+  if (screenshotPath.test(href)) token.attrSet("href", `/api/runs/${id}/${href}`);
+  else if (reportTabs.has(href)) token.attrSet("href", reportTabs.get(href));
+  if (!reportTabs.has(href)) {
+    token.attrSet("target", "_blank");
+    token.attrSet("rel", "noopener noreferrer");
+  }
+  return renderer.renderToken(tokens, index, options);
+};
+const renderImage = reportMarkdown.renderer.rules.image;
+reportMarkdown.renderer.rules.image = (tokens, index, options, env, renderer) => {
+  const token = tokens[index];
+  const src = token.attrGet("src");
+  if (!screenshotPath.test(src)) return reportMarkdown.utils.escapeHtml(renderer.renderInlineAsText(token.children, options, env));
+  token.attrSet("src", `/api/runs/${env.id}/${src}`);
+  return renderImage(tokens, index, options, env, renderer);
+};
 const files = {
   "/": ["index.html", "text/html; charset=utf-8"],
   "/app.js": ["app.js", "text/javascript; charset=utf-8"],
@@ -191,7 +215,12 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
         const [metadata, log, report, reviewReport, lowReport] = await Promise.all(
           ["run.json", "events.jsonl", "report.md", "report-medium.md", "report-low.md"].map(file => readRun(id, file, "utf8")),
         );
-        if (metadata) return json(200, { run: JSON.parse(metadata), events: parseEvents(log ?? ""), report, reviewReport, lowReport });
+        if (metadata) {
+          const reportPreviews = Object.fromEntries([
+            ["report.md", report], ["report-medium.md", reviewReport], ["report-low.md", lowReport],
+          ].filter(([, markdown]) => markdown !== null).map(([file, markdown]) => [file, reportMarkdown.render(markdown, { id })]));
+          return json(200, { run: JSON.parse(metadata), events: parseEvents(log ?? ""), report, reviewReport, lowReport, reportPreviews });
+        }
       }
       const asset = path.match(assetPath);
       if (asset) {

@@ -159,7 +159,7 @@ async function debrief({ model, people, events, record, directory }) {
       await record({ kind: "debrief_error", persona: persona.id, stage: "interview", message: clean(error.message) });
     }
   }
-  if (people.length !== 3) return;
+  if (people.length < 2) return;
   const conversation = [];
   for (let round = 1; round <= 2; round += 1) {
     for (const persona of people) {
@@ -196,7 +196,7 @@ function reviewEvidence(events, frames) {
 }
 
 async function writeReport({ model, people, events, directory, origin, file = "report.md", effort = "medium" }) {
-  const frames = new Map(events.filter(event => event.kind === "frame" && /^P[123]-(free|arrival|return)-\d{2}$/.test(event.frame))
+  const frames = new Map(events.filter(event => event.kind === "frame" && /^P[1-4]-(free|arrival|return)-\d{2}$/.test(event.frame))
     .map(event => [event.frame, event]));
   const links = (ids) => [...new Set(ids)].filter(id => frames.has(id)).map(id => `[${id}](${frames.get(id).image})`).join(", ");
   let review = { assessments: [], findings: [] };
@@ -330,7 +330,7 @@ export async function runStudy({ model, browser, people, root = "runs", origin =
     }
   };
   await writeFile(join(directory, "interviews.md"), "# 개별 인터뷰\n\n");
-  await writeFile(join(directory, "discussion.md"), "# 참가자 그룹 대화\n\n" + (people.length < 3 ? "파일럿은 개별 인터뷰만 진행합니다.\n" : ""));
+  await writeFile(join(directory, "discussion.md"), "# 참가자 그룹 대화\n\n" + (people.length < 2 ? "파일럿은 개별 인터뷰만 진행합니다.\n" : ""));
   onStart?.(id);
   console.log(`실행 ${id}`);
   for (const persona of people) {
@@ -381,7 +381,7 @@ export async function openInterview(runId, personaId, root = "runs") {
     .map(({ question, answer }) => ({ question, answer }));
   return {
     async ask(model, question) {
-      const frame = question.match(/\bP[123]-(?:free|arrival|return)-\d{2}\b/)?.[0]
+      const frame = question.match(/\bP[1-4]-(?:free|arrival|return)-\d{2}\b/)?.[0]
         ?? events.findLast(event => event.kind === "frame" && event.persona === personaId)?.frame;
       const answer = await askParticipant({ model, persona, events, conversation, question, directory, frame });
       await appendFile(join(directory, "events.jsonl"), JSON.stringify({ at: new Date().toISOString(), kind: "interview", persona: persona.id, question, answer }) + "\n");

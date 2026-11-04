@@ -2,11 +2,16 @@
   "name": "salmonbus-ut-agents",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.9.0" },
+  "engines": {
+    "node": ">=22.9.0"
+  },
   "scripts": {
     "ut": "node --env-file-if-exists=.env cli.js",
     "web": "node --env-file-if-exists=.env viewer.js",
     "test": "node --test"
   },
-  "dependencies": { "playwright": "1.63.0" }
+  "dependencies": {
+    "markdown-it": "15.0.3",
+    "playwright": "1.63.0"
+  }
 }

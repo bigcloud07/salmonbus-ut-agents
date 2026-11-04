@@ -13,28 +13,32 @@
     <span class="sync" id="sync" role="status">기록 확인 중</span>
   </header>
   <main>
-    <section class="intro" aria-labelledby="title">
-      <p class="eyebrow">SALMONBUS / USABILITY TEST</p>
-      <h1 id="title">연어 UT 관찰실</h1>
-      <p>페르소나가 본 화면과 그 순간의 발언을 함께 살펴보세요.</p>
-    </section>
-    <form class="surface launch" id="launch-form">
-      <div class="launch-fields">
-        <label>실행할 참가자
-          <select id="run-persona">
-            <option value="P1">P1 · 파일럿</option>
-            <option value="P2">P2</option>
-            <option value="P3">P3</option>
-            <option value="all">전체 참가자</option>
-          </select>
-        </label>
-        <label id="key-field">OpenAI API 키
-          <input type="password" id="api-key" autocomplete="off" maxlength="512" placeholder="이 탭에서 사용할 키">
-        </label>
-        <button type="submit" class="primary" id="launch-button">UT 시작</button>
+    <section class="overview" aria-labelledby="title">
+      <div class="intro">
+        <p class="eyebrow">SALMONBUS / USABILITY TEST</p>
+        <h1 id="title">연어 UT 관찰실</h1>
+        <p>페르소나가 본 화면과 그 순간의 발언을 함께 살펴보세요.</p>
       </div>
-      <p class="muted feedback" id="launch-feedback" role="status">운영 웹을 비회원으로 탐색합니다.</p>
-    </form>
+      <form class="surface launch" id="launch-form" aria-labelledby="launch-title">
+        <h2 id="launch-title">새 테스트 시작</h2>
+        <div class="launch-fields">
+          <label>실행할 참가자
+            <select id="run-persona">
+              <option value="P1">P1 · 파일럿</option>
+              <option value="P2">P2</option>
+              <option value="P3">P3</option>
+              <option value="P4">P4</option>
+              <option value="all">전체 참가자</option>
+            </select>
+          </label>
+          <label id="key-field">OpenAI API 키
+            <input type="password" id="api-key" autocomplete="off" maxlength="512" placeholder="이 탭에서 사용할 키">
+          </label>
+          <button type="submit" class="primary" id="launch-button">UT 시작</button>
+        </div>
+        <p class="muted feedback" id="launch-feedback" role="status">운영 웹을 비회원으로 탐색합니다.</p>
+      </form>
+    </section>
     <div class="workspace">
       <aside class="surface runs">
         <h2>실행 목록</h2>
@@ -71,6 +75,7 @@
         </div>
         <section id="interviews" class="surface records" aria-labelledby="interviews-title" hidden>
           <h3 id="interviews-title">개별 인터뷰</h3>
+          <ol id="interview-records" class="chat" aria-label="인터뷰 메시지"></ol>
           <form id="interview-form" class="interview-form">
             <label>질문할 참가자 <select id="interview-persona"></select></label>
             <label>추가 질문
@@ -79,16 +84,25 @@
             <button type="submit" class="primary" id="interview-button">질문 보내기</button>
             <p class="muted feedback" id="interview-feedback" role="status"></p>
           </form>
-          <div id="interview-records"></div>
         </section>
-        <section id="discussion" class="surface records" aria-label="그룹 대화" hidden></section>
-        <section id="report" class="surface records" aria-labelledby="report-title" hidden>
-          <div class="section-head">
-            <h3 id="report-title">UT 리포트 비교</h3>
+        <section id="discussion" class="surface records" aria-labelledby="discussion-title" hidden>
+          <h3 id="discussion-title">그룹 대화</h3>
+          <ol id="discussion-records" class="chat" aria-label="그룹 대화 메시지"></ol>
+        </section>
+        <section id="report" class="surface records" aria-labelledby="report-title" data-report-mode="preview" hidden>
+          <div class="section-head report-heading">
+            <div>
+              <p class="eyebrow">OBSERVATION NOTES</p>
+              <h3 id="report-title">UT 리포트 비교</h3>
+            </div>
             <div id="review-controls" class="review-controls">
               <button type="button" class="primary" data-review="medium">medium으로 재분석</button>
               <button type="button" data-review="low">low로 재분석</button>
             </div>
+          </div>
+          <div class="report-modes" id="report-modes" role="group" aria-label="리포트 표시 방식">
+            <button type="button" data-mode="preview" aria-pressed="true">미리보기</button>
+            <button type="button" data-mode="source" aria-pressed="false">Markdown 원문</button>
           </div>
           <p class="muted feedback" id="review-feedback" role="status"></p>
           <div id="report-records"></div>

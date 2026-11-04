@@ -103,6 +103,8 @@ function chooseRun(id) {
   detailVersion = undefined;
   $("interview-form").reset();
   $("interview-feedback").textContent = "";
+  $("interview-records").scrollTop = 0;
+  $("discussion-records").scrollTop = 0;
   $("review-feedback").textContent = "";
 }
 
@@ -169,26 +171,53 @@ function renderActivity() {
   list.scrollTop = scroll;
 }
 
+function chatMessage({ persona, text, at, outgoing = false }) {
+  const sender = outgoing ? "진행자" : personaName(persona);
+  const message = el("li", undefined, outgoing ? "chat-message outgoing" : "chat-message");
+  const body = el("div", undefined, "chat-body");
+  const line = el("div", undefined, "chat-line");
+  line.append(el("p", text, "chat-bubble"));
+  if (at) {
+    const time = el("time", clock.format(new Date(at)));
+    time.dateTime = at;
+    line.append(time);
+  }
+  body.append(el("strong", sender, "chat-sender"), line);
+  if (!outgoing) {
+    const avatar = el("span", sender.slice(0, 1), "chat-avatar");
+    avatar.dataset.persona = persona;
+    avatar.setAttribute("aria-hidden", "true");
+    message.append(avatar);
+  }
+  message.append(body);
+  return message;
+}
+
+function renderChat(list, messages, emptyMessage) {
+  const previousTop = list.scrollTop;
+  const atBottom = list.clientHeight > 0 && list.scrollHeight - previousTop - list.clientHeight < 32;
+  list.replaceChildren(...(messages.length ? messages : [el("li", emptyMessage, "chat-empty")]));
+  list.scrollTop = atBottom ? list.scrollHeight : previousTop;
+}
+
 function renderRecords() {
   const interviews = details.events.filter(event => event.kind === "interview");
-  const discussion = details.events.filter(event => event.kind === "discussion");
-  $("interview-records").replaceChildren(...interviews.map(event => {
-    const card = el("article", undefined, "utterance");
-    card.append(el("small", personaName(event.persona)), el("h4", event.question), el("p", event.answer));
-    return card;
-  }));
-  if (!interviews.length) $("interview-records").append(el("p", "아직 인터뷰 기록이 없습니다.", "muted"));
+  renderChat($("interview-records"), interviews.flatMap(event => [
+    chatMessage({ text: event.question, outgoing: true }),
+    chatMessage({ persona: event.persona, text: event.answer, at: event.at }),
+  ]), "아직 인터뷰 기록이 없습니다.");
 
-  $("discussion").replaceChildren(el("h3", "그룹 대화"), ...discussion.map(event => {
-    const card = el("article", undefined, "utterance");
-    card.append(el("small", `${event.round}차 · ${personaName(event.persona)}`), el("p", event.speech));
-    return card;
-  }));
-  if (!discussion.length) {
-    $("discussion").append(el("p", details.run.people.length === 1
+  const discussion = details.events.filter(event => event.kind === "discussion");
+  const messages = discussion.flatMap((event, index) => {
+    const message = chatMessage({ persona: event.persona, text: event.speech, at: event.at });
+    if (event.round === discussion[index - 1]?.round) return [message];
+    const divider = el("li", undefined, "chat-divider");
+    divider.append(el("span", `${event.round}차 대화`));
+    return [divider, message];
+  });
+  renderChat($("discussion-records"), messages, details.run.people.length === 1
       ? "참가자가 한 명이면 개별 인터뷰가 기록됩니다."
-      : "아직 그룹 대화 기록이 없습니다.", "muted"));
-  }
+      : "아직 그룹 대화 기록이 없습니다.");
 
   renderReports();
 }
@@ -211,7 +240,10 @@ function renderReports() {
     const download = el("a", "Markdown 다운로드");
     download.href = `/api/runs/${encodeURIComponent(selected)}/${file}`;
     download.download = file;
-    return [download, el("pre", contents)];
+    const preview = el("div", undefined, "report-preview");
+    // The server renders Markdown with raw HTML disabled and a link allowlist.
+    preview.innerHTML = details.reportPreviews[file];
+    return [download, preview, el("pre", contents, "report-source")];
   };
   const defaultIsMedium = details.report.includes("\n관찰자 추론 정도 · medium\n");
   const medium = details.reviewReport ?? (defaultIsMedium ? details.report : null);
@@ -339,7 +371,9 @@ $("interview-form").addEventListener("submit", async event => {
     if (selected === id) {
       if (field.value.trim() === question) field.value = "";
       feedback.textContent = "답변을 인터뷰 기록에 추가했습니다.";
-      loadDetail(id).catch(() => setSync(false));
+      loadDetail(id).then(() => {
+        if (selected === id) $("interview-records").scrollTop = $("interview-records").scrollHeight;
+      }).catch(() => setSync(false));
     }
   } catch (error) {
     if (selected === id) feedback.textContent = error.message;
@@ -369,6 +403,21 @@ $("review-controls").addEventListener("click", async event => {
     reviewing = false;
     updateReviewButtons();
   }
+});
+$("report-modes").addEventListener("click", event => {
+  const button = event.target.closest("button[data-mode]");
+  if (!button) return;
+  $("report").dataset.reportMode = button.dataset.mode;
+  for (const option of $("report-modes").querySelectorAll("button")) {
+    option.setAttribute("aria-pressed", String(option === button));
+  }
+});
+$("report-records").addEventListener("click", event => {
+  const view = event.target.closest(".report-preview a[href^='#']")?.getAttribute("href").slice(1);
+  if (!view) return;
+  event.preventDefault();
+  showView(view);
+  document.querySelector(`[data-view="${view}"]`).focus();
 });
 
 async function refresh() {

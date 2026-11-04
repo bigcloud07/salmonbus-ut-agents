@@ -140,9 +140,16 @@ test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추
 
   const directory = await runStudy({ model, browser, people: personas, root, origin });
   assert.deepEqual(prompts.filter(({ payload }) => payload.goal).map(({ payload }) => payload.priorActions.length),
-    [0, 0, 1, 0, 0, 1, 0, 0, 1]);
+    [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  for (const persona of personas) {
+    const { instructions } = prompts.find(({ payload, instructions }) => payload.goal && instructions.includes(`참가자 ${persona.id}`));
+    assert.equal(persona.sourceProfile.uuid, persona.source.uuid);
+    assert.equal(Object.keys(persona.sourceProfile).length, 26);
+    assert.ok(instructions.includes(JSON.stringify(persona.sourceProfile)));
+    assert.ok(instructions.includes(persona.commute));
+  }
   const discussion = prompts.filter(({ payload }) => payload.question?.includes("참가자") && !payload.question.includes("기대"));
-  assert.deepEqual(discussion.map(({ payload }) => payload.conversation.length), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(discussion.map(({ payload }) => payload.conversation.length), [0, 1, 2, 3, 4, 5, 6, 7]);
   assert.ok(discussion.every(({ payload, instructions }) => payload.experience.every(event => !event.frame || instructions.includes(event.frame.slice(0, 2)))));
   const report = await readFile(join(directory, "report.md"), "utf8");
   assert.match(report, /달성 \| 다른 동선/);

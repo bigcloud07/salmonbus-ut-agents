@@ -6,7 +6,7 @@ import { personas } from "./study.js";
 async function main([command, ...args]) {
   if (command === "run" && (!args.length || (args.length === 2 && args[0] === "--persona"))) {
     const people = args.length ? personas.filter(persona => persona.id === args[1]) : personas;
-    if (!people.length) throw new Error("참가자 ID는 P1, P2, P3 중 하나여야 합니다.");
+    if (!people.length) throw new Error(`참가자 ID는 ${personas.map(person => person.id).join(", ")} 중 하나여야 합니다.`);
     console.log(`결과 · ${await launchStudy({ model: createModel(), people })}/report.md`);
     return;
   }
