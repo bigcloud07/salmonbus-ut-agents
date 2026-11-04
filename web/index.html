@@ -8,20 +8,27 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <header class="top">
-    <a class="brand" href="#title">연어버스 <em>UT</em></a>
-    <nav class="top-nav" aria-label="관찰실 바로가기">
+  <header>
+    <nav class="top" aria-label="관찰실 바로가기">
       <a href="#launch-form">새 테스트</a>
       <a href="#runs-heading">실행 기록</a>
+      <a class="brand" href="#title">연어버스 UT Agent</a>
+      <a href="https://www.salmonbus.com/" target="_blank" rel="noopener noreferrer">연어 서비스 ↗</a>
+      <span class="sync" id="sync" role="status">기록 확인 중</span>
     </nav>
-    <span class="sync" id="sync" role="status">기록 확인 중</span>
   </header>
   <main>
     <section class="overview" aria-labelledby="title">
       <div class="intro">
         <p class="eyebrow">SALMONBUS / USABILITY TEST</p>
-        <h1 id="title">연어버스 <em>UT Agent</em></h1>
-        <p>페르소나가 본 화면과 그 순간의 발언을 함께 살펴보세요.</p>
+        <h1 id="title">연어버스 UT Agent</h1>
+        <p class="intro-copy" id="persona-index">
+          <span aria-hidden="true">__</span>네 명의 페르소나가 연어를 처음 사용합니다.
+          <a href="#launch-form" data-select-persona="P1">강정식</a>은 9007번을,
+          <a href="#launch-form" data-select-persona="P2">천상민</a>은 9300번을,
+          <a href="#launch-form" data-select-persona="P3">정미란</a>은 3000번을,
+          <a href="#launch-form" data-select-persona="P4">김상효</a>는 1101번을 찾습니다.
+        </p>
       </div>
       <form class="surface launch" id="launch-form" aria-labelledby="launch-title">
         <h2 id="launch-title">새 테스트 시작</h2>

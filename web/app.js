@@ -314,6 +314,10 @@ $("runs").addEventListener("click", event => {
   renderDetail();
   loadDetail(id).catch(() => setSync(false));
 });
+$("persona-index").addEventListener("click", event => {
+  const id = event.target.closest("[data-select-persona]")?.dataset.selectPersona;
+  if (id) $("run-persona").value = id;
+});
 $("events").addEventListener("click", event => {
   const frame = event.target.closest("[data-frame]")?.dataset.frame;
   if (!frame) return;
