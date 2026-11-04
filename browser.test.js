@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright";
-import { openSession } from "./browser.js";
+import { openSession, viewport } from "./browser.js";
 import { createModel } from "./model.js";
 import { openInterview, parseEvents, regenerateReport, runStudy } from "./run.js";
 import { personas } from "./study.js";
@@ -29,7 +29,12 @@ before(async () => {
     };
     switch (url.pathname) {
       case "/":
-        return send(`<a href="/api/auth/kakao/start?returnTo=${encodeURIComponent(board)}">카카오로 계속하기</a>`);
+        return send(`<style>body { min-height: 90vh; }</style>
+          <a href="/api/auth/kakao/start?returnTo=${encodeURIComponent(board)}">카카오로 계속하기</a>
+          <button style="position:absolute;left:20px;top:100px;width:100px;height:44px">
+            <span style="position:absolute;inset:0">노선 검색</span>
+          </button>
+          <input style="position:absolute;left:20px;top:180px" type="password" aria-label="입력란" value="tap-fixture-secret">`);
       case "/api/auth/kakao/start":
         return redirect("/mock-kakao");
       case "/mock-kakao":
@@ -117,7 +122,7 @@ test("인증 시간 초과 뒤에는 제공자 화면을 캡처하지 않는다"
   await assert.rejects(session.snapshot(), /관찰 범위 밖/);
 });
 
-test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추가 인터뷰를 저장한다", async (t) => {
+test("전체 러너는 탭 대상을 관찰자에게만 전달하고 그룹 대화와 추가 인터뷰를 저장한다", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "salmonbus-ut-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const prompts = [];
@@ -125,8 +130,12 @@ test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추
     const payload = JSON.parse(prompt);
     prompts.push({ payload, hasImage: Boolean(image), instructions });
     if (schema?.properties.action) {
-      if (instructions.includes("참가자 P1") && payload.goal.includes("다음 출근")) {
-        return { action: "tap", x: 35, y: 16, text: null, deltaY: null, submit: null, remark: "여기서 저장할 수 있는지 보고 싶어요." };
+      if (instructions.includes("참가자 P1")) {
+        const y = payload.goal.includes("다음 출근") ? 16
+          : payload.goal.includes("다음 버스가") ? [115, 300, 190][payload.priorActions.length] : undefined;
+        if (y !== undefined) {
+          return { action: "tap", x: 35, y, text: null, deltaY: null, submit: null, remark: "이곳을 눌러 볼게요." };
+        }
       }
       return { action: "stop", x: null, y: null, text: null, deltaY: null, submit: null, remark: "여기까지 둘러봤어요." };
     }
@@ -140,8 +149,11 @@ test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추
   } };
 
   const directory = await runStudy({ model, browser, people: personas, root, origin });
-  assert.deepEqual(prompts.filter(({ payload }) => payload.goal).map(({ payload }) => payload.priorActions.length),
-    [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  const participantPrompts = prompts.filter(({ payload }) => payload.priorActions);
+  assert.deepEqual(participantPrompts.map(({ payload }) => payload.priorActions.length),
+    [0, 0, 1, 2, 3, 4, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  assert.ok(participantPrompts.every(({ payload }) => payload.priorActions.every(
+    event => !("target" in event || "interactive" in event || event.kind === "tap_target"))));
   for (const persona of personas) {
     const { instructions } = prompts.find(({ payload, instructions }) => payload.goal && instructions.includes(`참가자 ${persona.id}`));
     assert.equal(persona.sourceProfile.uuid, persona.source.uuid);
@@ -160,6 +172,19 @@ test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추
 
   const log = join(directory, "events.jsonl");
   const before = parseEvents(await readFile(log, "utf8"));
+  const taps = before.filter(event => event.kind === "tap_target");
+  const observer = prompts.find(({ payload }) => payload.evidence).payload;
+  assert.deepEqual(observer.evidence.filter(event => event.kind === "tap_target"), taps);
+  assert.deepEqual(taps.map(({ frame, x, y, target, interactive }) => [
+    frame, x, y, target?.tag, target?.text, interactive?.tag,
+  ]), [
+    ["P1-arrival-01", 35, 115, "span", "노선 검색", "button"],
+    ["P1-arrival-02", 35, 300, "body", "", undefined],
+    ["P1-arrival-03", 35, 190, "input", "입력란", "input"],
+    ["P1-return-01", 35, 16, "a", "카카오로 계속하기", "a"],
+  ]);
+  assert.deepEqual(taps[0].viewport, viewport);
+  assert.doesNotMatch(JSON.stringify(taps), /tap-fixture-secret/);
   await appendFile(log, '{"kind":"interview","question":"잘린 질문');
   await regenerateReport({ model, runId: basename(directory), root });
   const interview = await openInterview(basename(directory), "P1", root);

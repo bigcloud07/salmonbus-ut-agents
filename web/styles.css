@@ -120,8 +120,19 @@ button:not(:disabled):hover { border-color: var(--ink); }
 .section-head label, #frame-info { font-size: .82rem; }
 #frame-info { margin-bottom: 12px; overflow-wrap: anywhere; }
 .screen { min-height: 150px; border: 1px dashed var(--line); background: var(--paper); }
-.screen.has-image { width: fit-content; max-width: 100%; margin: auto; border: 0; background: transparent; }
-.screen img { display: block; width: auto; max-width: 100%; max-height: 610px; border: 1px solid var(--line); }
+.screen.has-image { position: relative; min-height: 0; width: fit-content; max-width: 100%; margin: auto; border: 0; background: transparent; }
+.screen img { display: block; width: auto; max-width: 100%; max-height: 610px; outline: 1px solid var(--line); }
+#tap-marker {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #c72146;
+  box-shadow: 0 0 0 2px #171717;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
 #events { display: grid; list-style: none; padding: 3px; margin: -3px; max-height: 660px; overflow: auto; }
 .event strong { display: block; font-size: .9rem; }
 .event p { font-size: .9rem; margin-top: 6px; line-height: 1.6; overflow-wrap: anywhere; }
