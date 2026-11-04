@@ -148,7 +148,7 @@ test("웹에서 UT를 시작하고 추가 질문과 재분석을 같은 실행�
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.goto(origin);
-  await page.getByText("자동 갱신 중").waitFor();
+  await page.getByRole("option", { name: "김상효", exact: true }).waitFor({ state: "attached" });
   await page.getByRole("link", { name: "김상효", exact: true }).click();
   assert.equal(await page.getByLabel("실행할 참가자").inputValue(), "P4");
   if (await page.getByLabel("OpenAI API 키").isVisible()) await page.getByLabel("OpenAI API 키").fill("fixture-key");

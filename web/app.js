@@ -37,9 +37,8 @@ function el(tag, text, className) {
 
 function setSync(online) {
   const status = $("sync");
-  const message = online ? "자동 갱신 중" : "기록 연결 확인 중";
+  const message = online ? "" : "기록 연결 확인 중";
   if (status.textContent !== message) status.textContent = message;
-  status.classList.toggle("online", online);
 }
 
 function runDate(id) {
