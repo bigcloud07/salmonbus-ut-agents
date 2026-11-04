@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright";
 import { openSession } from "./browser.js";
-import { openInterview, runStudy } from "./run.js";
+import { createModel } from "./model.js";
+import { openInterview, parseEvents, regenerateReport, runStudy } from "./run.js";
 import { personas } from "./study.js";
 
 let browser, server, origin;
@@ -157,9 +158,58 @@ test("전체 러너는 자유 탐색 이력을 분리하고 그룹 대화와 추
   assert.match(report, /P1-free-01\.png/);
   assert.doesNotMatch(report, /fabricated-frame/);
 
+  const log = join(directory, "events.jsonl");
+  const before = parseEvents(await readFile(log, "utf8"));
+  await appendFile(log, '{"kind":"interview","question":"잘린 질문');
+  await regenerateReport({ model, runId: basename(directory), root });
   const interview = await openInterview(basename(directory), "P1", root);
-  await interview.ask(model, "P1-arrival-01에서 무엇을 기대했나요?");
+  const otherInterview = await openInterview(basename(directory), "P1", root);
+  const questions = ["P1-arrival-01에서 무엇을 기대했나요?", "P1-arrival-01에서 무엇을 확인했나요?"];
+  await Promise.all([interview.ask(model, questions[0]), otherInterview.ask(model, questions[1])]);
+  const recovered = parseEvents(await readFile(log, "utf8"));
+  assert.deepEqual(recovered.slice(0, -2), before);
+  assert.deepEqual(recovered.slice(-2).map(event => event.question).sort(), questions.sort());
   assert.equal(prompts.at(-1).hasImage, true);
   assert.equal(prompts.at(-1).payload.conversation.length, 1);
   assert.match(await readFile(join(directory, "interviews.md"), "utf8"), /강정식 추가 질문/);
+});
+
+test("마지막에 줄바꿈이 빠진 정상 이벤트는 보존하고 중간 손상은 드러낸다", () => {
+  const entry = '{"kind":"end","status":"stopped"}';
+  assert.deepEqual(parseEvents(entry), [{ kind: "end", status: "stopped" }]);
+  assert.throws(() => parseEvents(`${entry}\n{"kind":\n${entry}\n`), SyntaxError);
+});
+
+test("한 번의 429 뒤 과업을 이어가고 재시도가 모두 실패하면 모델 오류를 남긴다", async t => {
+  const root = await mkdtemp(join(tmpdir(), "salmonbus-retry-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const attempts = new Map();
+  t.mock.method(globalThis, "fetch", async (_url, { body }) => {
+    const request = JSON.parse(body);
+    const payload = JSON.parse(request.input[0].content[0].text);
+    const properties = request.text.format.schema.properties;
+    if (properties.action && payload.goal.includes("앉아 갈")) {
+      const id = request.instructions.includes("참가자 P1") ? "P1" : "P2";
+      const count = (attempts.get(id) ?? 0) + 1;
+      attempts.set(id, count);
+      if (id === "P2" || count === 1) {
+        return Response.json({ error: { code: "rate_limit_exceeded" } }, { status: 429, headers: { "Retry-After": "0" } });
+      }
+    }
+    const result = properties.action ? { action: "stop", remark: "확인했어요." }
+      : properties.assessments ? { assessments: [], findings: [] }
+        : { speech: "대역 응답" };
+    return Response.json({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(result) }] }] });
+  });
+  const directory = await runStudy({ model: createModel("fixture-key"), browser, people: personas.slice(0, 2), root, origin });
+  const events = parseEvents(await readFile(join(directory, "events.jsonl"), "utf8"));
+  const arrival = events.filter(event => event.task === "arrival");
+  assert.deepEqual([...attempts], [["P1", 2], ["P2", 3]]);
+  assert.deepEqual(arrival.filter(event => event.kind === "end").map(({ persona, status }) => [persona, status]), [
+    ["P1", "stopped"], ["P2", "execution_error"],
+  ]);
+  assert.equal(arrival.filter(event => event.kind === "action" && event.persona === "P1").length, 1);
+  const error = arrival.find(event => event.kind === "error" && event.persona === "P2");
+  assert.equal(error.source, "model");
+  assert.match(error.message, /HTTP 429/);
 });

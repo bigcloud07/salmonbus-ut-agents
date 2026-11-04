@@ -1,7 +1,8 @@
-import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
+import lockfile from "proper-lockfile";
 import { openSession, production, validateAction, viewport } from "./browser.js";
 import { actionSchema, modelId, objectSchema } from "./model.js";
 import { dataset, participantPrompt, personaNames, tasksFor } from "./study.js";
@@ -44,6 +45,45 @@ function evidenceHistory(events) {
     .map(({ frame, action, remark, result }) => ({ frame, action, remark, result }));
 }
 
+function parseEventLog(log) {
+  const lines = log.split("\n");
+  const tail = lines.pop();
+  const events = lines.filter(line => line.trim()).map(line => JSON.parse(line));
+  if (tail.trim()) {
+    try {
+      events.push(JSON.parse(tail));
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      return { events, completeLength: log.length - tail.length };
+    }
+  }
+  return { events, completeLength: log.length };
+}
+
+export function parseEvents(log) {
+  return parseEventLog(log).events;
+}
+
+async function appendEvent(path, event) {
+  const release = await lockfile.lock(path, {
+    realpath: false,
+    retries: { retries: 8, minTimeout: 40, maxTimeout: 500 },
+  });
+  try {
+    const log = await readFile(path, "utf8").catch(error => {
+      if (error.code !== "ENOENT") throw error;
+      return "";
+    });
+    const { completeLength } = parseEventLog(log);
+    const complete = log.slice(0, completeLength);
+    if (completeLength !== log.length) await truncate(path, Buffer.byteLength(complete));
+    const separator = complete && !complete.endsWith("\n") ? "\n" : "";
+    await appendFile(path, separator + JSON.stringify(event) + "\n");
+  } finally {
+    await release();
+  }
+}
+
 async function runPhase({ session, persona, task, limit, deadline, model, record, directory, history }) {
   const { id } = task;
   const events = [];
@@ -63,6 +103,7 @@ async function runPhase({ session, persona, task, limit, deadline, model, record
 
   let status = "action_limit";
   let step = 0;
+  let errorSource = "browser";
   try {
     while (step < limit) {
       const remaining = deadline - Date.now();
@@ -71,11 +112,13 @@ async function runPhase({ session, persona, task, limit, deadline, model, record
         break;
       }
       step += 1;
+      errorSource = "browser";
       const { frame, image } = await capture(step);
       if (Date.now() >= deadline) {
         status = "time_limit";
         break;
       }
+      errorSource = "model";
       const action = validateAction(await model.respond({
         instructions: `${participantPrompt(persona)}\n${actionInstructions}`,
         prompt: JSON.stringify({ goal: task.prompt, viewport, priorActions: [...history, ...evidenceHistory(events)] }),
@@ -83,6 +126,7 @@ async function runPhase({ session, persona, task, limit, deadline, model, record
         schema: actionSchema,
         signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       }));
+      errorSource = "runner";
       const { remark, ...decision } = action;
       console.log(`[${frame}] ${decision.action} · ${clean(remark)}`);
       await add({ kind: "action", frame, action: decision, remark: clean(remark) });
@@ -90,14 +134,18 @@ async function runPhase({ session, persona, task, limit, deadline, model, record
         status = "stopped";
         break;
       }
+      errorSource = "browser";
       const result = await session.act(action);
+      errorSource = "runner";
       if (result) {
         console.log(`[${frame}] ${result}`);
         await add({ kind: "action_result", frame, result });
       }
       // The app may wait for a click analytics callback before starting navigation.
       await new Promise(resolve => setTimeout(resolve, 350));
+      errorSource = "browser";
       const auth = await session.takeAuth();
+      errorSource = "runner";
       if (auth) {
         await add({ kind: "auth", frame, ...auth });
         console.log(`[${frame}] 인증 상태 ${auth.status === "not_run" ? "미실행" : auth.status}`);
@@ -108,7 +156,10 @@ async function runPhase({ session, persona, task, limit, deadline, model, record
         deadline += auth.waitMs;
       }
     }
-    if (step > 0 && (status === "action_limit" || status === "time_limit")) await capture(step + 1);
+    if (step > 0 && (status === "action_limit" || status === "time_limit")) {
+      errorSource = "browser";
+      await capture(step + 1);
+    }
   } catch (error) {
     const auth = await session.takeAuth();
     if (auth?.status === "not_run") {
@@ -116,7 +167,7 @@ async function runPhase({ session, persona, task, limit, deadline, model, record
       status = "auth_not_run";
     } else {
       status = Date.now() >= deadline ? "time_limit" : "execution_error";
-      if (status === "execution_error") await add({ kind: "error", message: clean(error.message).slice(0, 250) });
+      if (status === "execution_error") await add({ kind: "error", source: errorSource, message: clean(error.message).slice(0, 250) });
     }
   }
   const lastFrame = events.findLast(event => event.kind === "frame");
@@ -296,7 +347,7 @@ export async function regenerateReport({ model, runId, root = "runs", effort = "
     readFile(join(directory, "events.jsonl"), "utf8"),
   ]);
   const { people, origin } = JSON.parse(run);
-  const events = log.trimEnd().split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const events = parseEvents(log);
   const file = `report-${effort}.md`;
   await writeReport({ model, people, events, directory, origin, file, effort });
   return join(directory, file);
@@ -320,7 +371,7 @@ export async function runStudy({ model, browser, people, root = "runs", origin =
   const events = [];
   const record = async (event) => {
     const entry = { at: new Date().toISOString(), ...event };
-    await appendFile(join(directory, "events.jsonl"), JSON.stringify(entry) + "\n");
+    await appendEvent(join(directory, "events.jsonl"), entry);
     events.push(entry);
     if (event.kind === "interview") {
       await appendFile(join(directory, "interviews.md"), `## ${personaNames[event.persona] ?? event.persona}\n\n질문 · ${markdown(event.question)}\n\n답변 · ${markdown(event.answer)}\n\n`);
@@ -376,7 +427,8 @@ export async function openInterview(runId, personaId, root = "runs") {
   const run = JSON.parse(await readFile(join(directory, "run.json"), "utf8"));
   const persona = run.people.find(person => person.id === personaId);
   if (!persona) throw new Error("이 실행에 해당 참가자가 없습니다.");
-  const events = (await readFile(join(directory, "events.jsonl"), "utf8")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const logPath = join(directory, "events.jsonl");
+  const events = parseEvents(await readFile(logPath, "utf8"));
   const conversation = events.filter(event => event.kind === "interview" && event.persona === persona.id)
     .map(({ question, answer }) => ({ question, answer }));
   return {
@@ -384,7 +436,7 @@ export async function openInterview(runId, personaId, root = "runs") {
       const frame = question.match(/\bP[1-4]-(?:free|arrival|return)-\d{2}\b/)?.[0]
         ?? events.findLast(event => event.kind === "frame" && event.persona === personaId)?.frame;
       const answer = await askParticipant({ model, persona, events, conversation, question, directory, frame });
-      await appendFile(join(directory, "events.jsonl"), JSON.stringify({ at: new Date().toISOString(), kind: "interview", persona: persona.id, question, answer }) + "\n");
+      await appendEvent(logPath, { at: new Date().toISOString(), kind: "interview", persona: persona.id, question, answer });
       await appendFile(join(directory, "interviews.md"), `## ${personaNames[persona.id] ?? persona.id} 추가 질문\n\n질문 · ${markdown(question)}\n\n답변 · ${markdown(answer)}\n\n`);
       return answer;
     },
