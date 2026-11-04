@@ -2,7 +2,7 @@
   <h1>연어버스 UT Agent</h1>
   <p>네 명의 AI 페르소나가 연어를 사용하고, 웹 관찰실에서 화면과 행동을 기록합니다.</p>
   <p>
-    <a href="https://salmonbus-ut-agents.vercel.app/"><strong>웹 관찰실 열기</strong></a>
+    <a href="https://salmonbus-ut-agents.vercel.app/"><strong>연어버스 UT Agent 열기</strong></a>
     &nbsp;·&nbsp;
     <a href="https://www.salmonbus.com/">연어 서비스</a>
     &nbsp;·&nbsp;
@@ -10,12 +10,14 @@
   </p>
 </div>
 
-![연어버스 UT Agent의 medium과 low 리포트 비교 화면](docs/ut-viewer.png)
+![흑백 관찰실에서 참가자 이름을 선택하고 medium과 low 리포트를 비교하는 화면](docs/ut-viewer.png)
+
+*예시 기록을 표시한 관찰실 미리보기입니다.*
 
 ## 웹에서 사용하기
 
 1. [웹 관찰실](https://salmonbus-ut-agents.vercel.app/)에서 OpenAI API 키를 입력합니다.
-2. 참가자 한 명 또는 **전체 참가자**를 선택하고 **UT 시작**을 누릅니다.
+2. 소개 문장 속 이름을 누르거나 **실행할 참가자** 목록에서 한 명 또는 **전체 참가자**를 선택한 뒤 **UT 시작**을 누릅니다.
 3. **사용 기록**에서 행동과 화면을 보고, 종료 후 **인터뷰**에서 추가 질문을 보냅니다.
 
 참가자는 모바일 Chromium에서 연어를 비회원으로 자유 탐색한 뒤, 평소 타는 버스의 도착·좌석 정보를 찾습니다. **그룹 대화**와 **리포트**에서 결과를 보고, 관찰자 기본값인 `medium`을 `low`와 비교할 수 있습니다.
