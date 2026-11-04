@@ -1,0 +1,136 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", system-ui, sans-serif;
+  color: #261c1a;
+  background: #f8f5f2;
+  --surface: #fffdfb;
+  --muted: #665955;
+  --line: #e7ddd7;
+  --accent: #9f302b;
+  --tint: #fff0eb;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+button, select, input, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .55; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+h1, h2, h3, h4, p { margin: 0; }
+a { color: var(--accent); }
+
+.top {
+  min-height: 64px;
+  padding: 12px max(24px, calc((100% - 1280px) / 2));
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; }
+.brand > span:last-child { font-weight: 600; color: var(--muted); }
+.mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: white;
+  background: var(--accent);
+}
+.sync { font-size: .83rem; color: var(--muted); white-space: nowrap; }
+.sync::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: #a68d70;
+}
+.sync.online::before { background: #347554; }
+
+main { width: min(1280px, calc(100% - 48px)); margin: 0 auto; padding: 40px 0 48px; }
+.intro { margin-bottom: 28px; }
+.eyebrow { color: var(--accent); font-size: .72rem; font-weight: 800; letter-spacing: .14em; }
+h1 { font-size: clamp(1.85rem, 4vw, 2.65rem); margin: 8px 0; letter-spacing: -.04em; }
+.intro > p:last-child, .muted, #frame-info, #run-info, .empty p { color: var(--muted); }
+.workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 18px; align-items: start; }
+.surface { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.launch { padding: 16px 20px; margin-bottom: 18px; }
+.launch-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.launch-fields label, .interview-form label { display: grid; gap: 6px; font-size: .83rem; }
+.launch-fields input, .interview-form textarea {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  padding: 7px 10px;
+  min-width: 0;
+}
+button.primary { background: var(--accent); color: white; border: 1px solid var(--accent); border-radius: 8px; padding: 7px 14px; font-size: .84rem; }
+.feedback { margin-top: 8px; font-size: .82rem; }
+.interview-form { display: grid; gap: 10px; justify-items: start; margin: 14px 0 18px; }
+.interview-form label:nth-child(2), .interview-form textarea { width: 100%; }
+.interview-form .feedback { margin: 0; }
+#interview-records > .muted { margin-top: 10px; }
+.runs, .preview, .timeline, .records { padding: 18px; }
+.runs h2, .section-head h3, .records h3 { font-size: 1rem; }
+#runs { display: grid; gap: 8px; margin-top: 14px; }
+.run-link, .event {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: inherit;
+}
+.run-link small, .event small, .utterance small { display: block; color: var(--muted); font-size: .76rem; }
+.run-link small, .event strong { margin-top: 4px; }
+button[aria-pressed="true"] { background: var(--tint); border-color: #ce8880; color: var(--accent); }
+button:not(:disabled):hover { border-color: #ce8880; }
+.empty { min-height: 260px; padding: 40px 24px; display: grid; place-content: center; gap: 12px; text-align: center; }
+.run-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.run-header h2 { font-size: 1.24rem; margin: 4px 0; }
+#run-info { font-size: .83rem; }
+.badge { background: #f5ebe6; color: #59453d; border-radius: 999px; padding: 5px 10px; font-size: .76rem; white-space: nowrap; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+.tabs button, #follow, select {
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 7px 10px;
+  font-size: .84rem;
+}
+.activity { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 12px; align-items: start; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.section-head label, #frame-info { font-size: .82rem; }
+#frame-info { margin-bottom: 12px; overflow-wrap: anywhere; }
+.screen { min-height: 150px; border: 1px dashed var(--line); border-radius: 14px; background: #f7f1ed; }
+.screen.has-image { width: fit-content; max-width: 100%; margin: auto; border: 0; background: transparent; }
+.screen img { display: block; width: auto; max-width: 100%; max-height: 610px; border-radius: 12px; border: 1px solid var(--line); }
+#events { display: grid; gap: 8px; list-style: none; padding: 3px; margin: -3px; max-height: 660px; overflow: auto; }
+.event strong { display: block; font-size: .9rem; }
+.event p, .utterance p { font-size: .9rem; margin-top: 6px; line-height: 1.6; overflow-wrap: anywhere; }
+.records > .muted, .records > a { display: inline-block; margin-top: 12px; }
+.utterance { border-top: 1px solid var(--line); padding: 14px 0; }
+.utterance:first-of-type { margin-top: 12px; }
+.utterance h4 { margin-top: 6px; font-size: .92rem; }
+.records pre { font-size: .83rem; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f1ed; border-radius: 10px; padding: 14px; line-height: 1.6; }
+
+@media (max-width: 860px) {
+  .workspace { grid-template-columns: 170px minmax(0, 1fr); }
+  .activity { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 580px) {
+  .top { padding-inline: 16px; }
+  main { width: calc(100% - 28px); padding-top: 24px; }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  #runs { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
+  .preview, .timeline, .records, .runs { padding: 14px; }
+}
