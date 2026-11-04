@@ -1,17 +1,68 @@
-# 연어 UT 에이전트
+<div align="center">
+  <h1>연어 UT 에이전트</h1>
+  <p>세 명의 AI 페르소나가 연어를 사용하고, 관찰실에서 그 과정을 함께 살펴봅니다.</p>
+  <p>
+    <a href="https://github.com/woowacourse-teams/2026-salmonbus"><strong>연어 원본 저장소</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://www.salmonbus.com/"><strong>연어 서비스</strong></a>
+    &nbsp;·&nbsp;
+    <a href="#빠른-시작"><strong>빠른 시작</strong></a>
+  </p>
+  <p><code>Node.js 22.9+</code> &nbsp; <code>Playwright</code> &nbsp; <code>GPT-6 Luna</code></p>
+</div>
 
-페르소나 세 명이 [연어 운영 웹](https://www.salmonbus.com/)을 모바일 크기의 Chromium에서 사용합니다. 자유 탐색과 목표 기반 UT는 각각 새 비회원 세션에서 시작합니다. 사용 화면은 브라우저에서, 행동과 발언은 터미널에서 볼 수 있습니다.
+![연어 UT 관찰실에서 9007번 화면과 참가자의 행동을 함께 보는 모습](docs/ut-viewer.png)
 
-## 실행
+*웹 관찰실 미리보기. 참가자의 행동과 발언은 화면을 설명하기 위한 예시입니다.*
 
-Node.js 22.9 이상에서 의존성과 브라우저를 설치합니다.
+## 빠른 시작
 
 ```sh
+git clone https://github.com/bigcloud07/salmonbus-ut-agents.git
+cd salmonbus-ut-agents
 npm ci
 npx playwright install chromium
+npm run web
 ```
 
-`OPENAI_API_KEY`를 환경 변수나 이 디렉터리의 `.env`에 설정합니다. 러너는 `gpt-6-luna`에 접근할 수 있는지 확인한 후 브라우저를 엽니다. API 요청에는 운영 화면 캡처와 페르소나 기록이 포함되며 사용량에 따라 과금됩니다. [OpenAI API 데이터 처리](https://developers.openai.com/api/docs/guides/your-data)
+1. [연어 UT 관찰실](http://127.0.0.1:4310/)을 열고 OpenAI API 키를 입력합니다. 환경 변수나 `.env`에 `OPENAI_API_KEY`가 있으면 그 값을 사용합니다.
+2. **P1 파일럿** 또는 **전체 참가자**를 선택하고 **UT 시작**을 누릅니다.
+3. **사용 기록**에서 행동을 클릭해 당시 화면을 확인합니다. 실행이 끝나면 **인터뷰**에서 추가 질문을 보내고 **그룹 대화**, **리포트**를 읽을 수 있습니다.
+
+웹에 입력한 키는 해당 탭에서 사용합니다. 저장된 실행은 키 없이 열 수 있습니다. 모델을 호출할 때 화면 캡처와 페르소나 기록을 OpenAI API에 보내며 사용량에 따라 과금됩니다. [OpenAI API 데이터 처리](https://developers.openai.com/api/docs/guides/your-data)
+
+## 참가자와 테스트 흐름
+
+| 참가자 | 평소 타는 버스 | 이용 습관 |
+| --- | --- | --- |
+| **P1** | 9007번, 운중동행정복지센터 → 서울역 방면 | 주 5회 탑승하고 노선에 익숙합니다. |
+| **P2** | 9300번, 도촌동9단지앞 → 서울역 방면 | 좌석 가능성에 따라 출발 시각을 조정합니다. |
+| **P3** | 3000번, 미사역호반써밋 → 판교 방면 | 최근 타기 시작해 정류장과 방면을 다시 확인합니다. |
+
+페르소나의 나이, 거주 구역, 직업은 CC BY 4.0 데이터셋에서 가져왔습니다. 통근 경로와 습관은 연어 테스트용으로 덧붙였으며, 각 실행에 원본 행 ID와 데이터셋 리비전을 기록합니다. [NVIDIA Nemotron-Personas-Korea](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea)
+
+1. **자유 탐색**에서 참가자에게 첫 화면만 보여 줍니다.
+2. **목표 기반 테스트**는 새 비회원 세션에서 시작합니다. 참가자는 평소 타는 버스의 도착 시간과 좌석 예보를 찾고, 다음 출근 때 다시 볼 방법을 탐색합니다.
+3. **인터뷰와 그룹 대화**에서 참가자는 자신이 본 화면과 한 행동을 바탕으로 경험을 이야기합니다. 리포트에는 과업 달성 여부, 실제 동선, 관찰 근거를 남깁니다.
+
+관찰 중에는 조작 방법을 알려 주지 않습니다. 합성 참가자에게서 발견한 문제는 실제 사용자 테스트에서 확인할 가설로 활용합니다. [우아한테크코스 UT 실습 가이드](https://techcourse-lms-plus-web.woowahan.com/missions/52?step=495)
+
+## 실행 기록과 검증
+
+각 실행은 로컬 `runs/<run-id>/`에 저장됩니다.
+
+| 파일 | 내용 |
+| --- | --- |
+| `report.md` | 과업별 결과와 주요 발견, 근거 화면 링크 |
+| `events.jsonl`, `screens/` | 시간순 행동과 발언, 단계별 화면 |
+| `interviews.md`, `discussion.md` | 개별 인터뷰와 참가자 간 대화 |
+
+운영 테스트는 비회원으로 실행하며 로그인 안내 화면까지 관찰할 수 있습니다. `npm test`는 운영 인증 요청과 쓰기 차단, 로컬 카카오 대역에서의 인증 인계와 복귀, 웹 관찰실의 실행과 추가 질문을 검증합니다. 실제 카카오 인증과 즐겨찾기 저장 검증에는 운영 UT 전용 계정이 필요합니다.
+
+<details>
+<summary>터미널에서 실행하기</summary>
+
+환경 변수나 `.env`에 `OPENAI_API_KEY`를 설정한 뒤 실행합니다.
 
 ```sh
 npm run ut -- run --persona P1
@@ -19,24 +70,6 @@ npm run ut -- run
 npm run ut -- interview <run-id> P1
 ```
 
-첫 명령은 P1 파일럿입니다. 두 번째 명령은 세 참가자와 그룹 대화를 실행합니다. 마지막 명령으로 이전 실행의 참가자 한 명에게 터미널에서 추가 질문할 수 있습니다. 질문에 `P1-arrival-01` 같은 화면 ID를 적으면 그 화면을 함께 참조합니다.
+추가 질문에 `P1-arrival-01` 같은 화면 ID를 적으면 참가자가 그 화면을 함께 참조합니다.
 
-`runs/<run-id>/report.md`에서 화면과 관찰을 함께 볼 수 있습니다. 단계별 PNG, 전체 행동 로그, 개별 인터뷰, 그룹 대화도 같은 폴더에 저장합니다.
-
-## 웹에서 관찰
-
-```sh
-npm run web
-```
-
-[연어 UT 관찰실](http://127.0.0.1:4310/)에서 참가자를 선택하고 **UT 시작**을 누릅니다. 환경 변수나 `.env`에 키가 없으면 웹 화면에서 입력할 수 있습니다. 웹에서 입력한 키는 해당 탭에서 사용하며 파일에 저장하지 않습니다. 저장된 실행의 조회는 키 없이 가능합니다.
-
-새 기록은 자동으로 표시됩니다. 참가자의 행동을 눌러 당시 화면을 보고, 실행이 끝나면 **인터뷰**에서 참가자에게 추가 질문을 보낼 수 있습니다. 그룹 대화와 리포트도 같은 페이지에서 열 수 있습니다.
-
-## 인증 검증
-
-운영 실행은 읽기 전용 비회원 모드입니다. 앱의 로그인 안내 화면까지 관찰할 수 있으며 소셜 인증 시작·콜백과 쓰기 요청은 브라우저에서 차단합니다.
-
-`npm test`는 로컬 카카오 대역에서 신규 가입·기존 회원 로그인·취소·실패·시간 초과를 실행합니다. 인증 중에는 참가자 조작과 캡처를 정지하고, 복귀 후 세션을 확인합니다. 로컬 대역으로 확인한 범위는 러너의 인계와 복귀입니다. 실제 카카오 인증과 즐겨찾기 저장·원복 검증은 운영 UT 전용 계정 준비 후 진행합니다.
-
-페르소나의 나이·거주 구역·직업은 [NVIDIA Nemotron-Personas-Korea](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea)의 CC BY 4.0 자료를 사용했습니다. 출처 리비전과 행 ID는 실행 기록에 함께 저장합니다. 출퇴근 경로와 습관은 테스트용으로 추가했습니다. 진행 방식은 [우아한테크코스 UT 실습 가이드](https://techcourse-lms-plus-web.woowahan.com/missions/52?step=495)를 따릅니다.
+</details>
