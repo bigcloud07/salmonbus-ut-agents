@@ -100,6 +100,54 @@ test("웹 관찰실은 새 실행을 발견하고 선택한 장면을 유지하�
   assert.equal((await fetch(`${origin}/api/runs/${id}/run.json`)).status, 404);
 });
 
+test("리포트 위치는 판정 파일로 정하고 판정 파일이 없는 실행은 이전 리포트로 연다", async t => {
+  const root = await mkdtemp(join(tmpdir(), "salmonbus-judgment-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const save = async (id, report, judgment) => {
+    const directory = join(root, id);
+    await mkdir(directory);
+    await writeFile(join(directory, "run.json"), JSON.stringify({ id, model: "gpt-6-luna", people: [{ id: "P1" }] }) + "\n");
+    await writeFile(join(directory, "events.jsonl"), "");
+    await writeFile(join(directory, "report.md"), report);
+    if (judgment) await writeFile(join(directory, "report.json"), JSON.stringify(judgment) + "\n");
+  };
+  await save("2026-11-04T03-00-00-000Z-11111111", "# 판정 없는 기존 리포트\n");
+  await save("2026-11-04T04-00-00-000Z-22222222", "# 판정 있는 리포트\n", { effort: "medium", tasks: [], findings: [] });
+  await save("2026-11-04T02-00-00-000Z-33333333", "# 판정 파일이 깨진 리포트\n");
+  await writeFile(join(root, "2026-11-04T02-00-00-000Z-33333333", "report.json"), "{");
+  const server = createViewer({ root });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise(resolve => server.close(resolve));
+  });
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.getByRole("button", { name: "리포트", exact: true }).click();
+
+  const medium = page.getByRole("region", { name: "medium 리포트" });
+  await medium.getByRole("heading", { name: "판정 있는 리포트" }).waitFor();
+  assert.equal(await page.getByText("이전 리포트 보기").count(), 0);
+
+  await page.locator("[data-run='2026-11-04T03-00-00-000Z-11111111']").click();
+  await page.getByText("이전 리포트 보기").waitFor();
+  await page.getByRole("heading", { name: "판정 없는 기존 리포트" }).waitFor();
+
+  await page.locator("[data-run='2026-11-04T02-00-00-000Z-33333333']").click();
+  await page.getByRole("heading", { name: "판정 파일이 깨진 리포트" }).waitFor();
+
+  await page.route("**/api/runs/2026-11-04T04-00-00-000Z-22222222", async route => {
+    const response = await route.fetch(), json = await response.json();
+    delete json.judgments;
+    await route.fulfill({ response, json });
+  });
+  await page.locator("[data-run='2026-11-04T04-00-00-000Z-22222222']").click();
+  await page.getByText("이전 리포트 보기").waitFor();
+  await page.getByRole("heading", { name: "판정 있는 리포트" }).waitFor();
+});
+
 test("웹에서 UT를 시작하고 추가 질문과 재분석을 같은 실행에 저장한다", async t => {
   const root = await mkdtemp(join(tmpdir(), "salmonbus-controls-"));
   t.after(() => rm(root, { recursive: true, force: true }));

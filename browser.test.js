@@ -169,6 +169,14 @@ test("전체 러너는 탭 대상을 관찰자에게만 전달하고 그룹 대�
   assert.match(report, /강정식 \| 다시 찾기 \| 인증 미실행/);
   assert.match(report, /P1-free-01\.png/);
   assert.doesNotMatch(report, /fabricated-frame/);
+  const judgment = JSON.parse(await readFile(join(directory, "report.json"), "utf8"));
+  assert.equal(judgment.effort, "medium");
+  assert.equal(judgment.reviewError, null);
+  assert.equal(judgment.tasks.length, personas.length * 2);
+  const taskOf = (persona, task) => judgment.tasks.find(entry => entry.persona === persona && entry.task === task);
+  assert.deepEqual([taskOf("P1", "arrival").outcome, taskOf("P1", "arrival").flow], ["success", "alternative"]);
+  assert.equal(taskOf("P1", "return").outcome, "auth_not_run");
+  assert.deepEqual(judgment.findings[0].evidence, ["P1-free-01"]);
 
   const log = join(directory, "events.jsonl");
   const before = parseEvents(await readFile(log, "utf8"));

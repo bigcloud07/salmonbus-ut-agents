@@ -249,19 +249,17 @@ function reviewEvidence(events, frames) {
     } : event);
 }
 
-async function writeReport({ model, people, events, directory, origin, file = "report.md", effort = "medium" }) {
-  const frames = new Map(events.filter(event => event.kind === "frame" && /^P[1-4]-(free|arrival|return)-\d{2}$/.test(event.frame))
+function reportFrames(events) {
+  return new Map(events.filter(event => event.kind === "frame" && /^P[1-4]-(free|arrival|return)-\d{2}$/.test(event.frame))
     .map(event => [event.frame, event]));
-  const links = (ids) => [...new Set(ids)].filter(id => frames.has(id)).map(id => `[${id}](${frames.get(id).image})`).join(", ");
-  let review = { assessments: [], findings: [] };
-  let reviewError;
-  if (frames.size) {
-    try {
-      const images = await Promise.all([...frames.keys()].map(async frame => ({
-        frame, image: await readFile(join(directory, "screens", frame + ".png")),
-      })));
-      review = await model.respond({
-        instructions: `당신은 사용성 테스트 관찰자입니다. 제공된 기록만 증거로 사용하세요.
+}
+
+async function requestReview({ model, people, events, directory, frames, effort }) {
+  const images = await Promise.all([...frames.keys()].map(async frame => ({
+    frame, image: await readFile(join(directory, "screens", frame + ".png")),
+  })));
+  return model.respond({
+    instructions: `당신은 사용성 테스트 관찰자입니다. 제공된 기록만 증거로 사용하세요.
 참가자별 arrival과 return 각각 한 건을 판정하고, 주요 발견은 최대 3건만 작성하세요.
 예상 동선은 노선 찾기 → 방향과 정류장 확인 → 도착과 좌석 정보 읽기 → 정류장 저장 시도 → 로그인 안내입니다.
 화면에서 목표를 달성했다면 동선이 달라도 success로 판정하세요. 둘 중 한 정보만 확인했으면 partial입니다.
@@ -272,24 +270,48 @@ async function writeReport({ model, people, events, directory, origin, file = "r
 tap_target은 같은 frame에서 터치가 전달된 요소와 가장 가까운 조작 요소입니다. target이 null이면 터치 대상이 기록되지 않은 경우입니다. 대상과 앞뒤 화면을 함께 보고, 이 기록만으로 조작 결과를 단정하지 마세요.
 after가 null이면 해당 행동 뒤 화면이 기록되지 않았습니다. 판정과 발견의 evidence에는 관련 화면 ID를 하나씩 정확히 적으세요. 범위나 접두어는 사용하지 마세요. 과업 판정의 근거는 그 참가자의 같은 과업 화면에서 고르세요.
 기록에 없는 조작이나 결과를 추가하지 마세요.`,
-        prompt: JSON.stringify({
-          targets: people.map(({ id, target }) => ({ id, target })),
-          evidence: reviewEvidence(events, frames),
-        }),
-        images,
-        schema: reviewSchema,
-        effort,
-        timeout: 240_000,
-        maxOutput: 6000,
-      });
-    } catch (error) {
-      if (file !== "report.md") throw error;
-      reviewError = clean(error.message);
-    }
-  } else if (file !== "report.md") {
-    throw new Error("재분석할 화면 기록이 없습니다.");
-  }
+    prompt: JSON.stringify({
+      targets: people.map(({ id, target }) => ({ id, target })),
+      evidence: reviewEvidence(events, frames),
+    }),
+    images,
+    schema: reviewSchema,
+    effort,
+    timeout: 240_000,
+    maxOutput: 6000,
+  });
+}
 
+function judgedTasks({ people, events, frames, review }) {
+  return people.flatMap(persona => ["arrival", "return"].map(task => {
+    const belongsToTask = event => event.persona === persona.id && event.task === task;
+    const end = events.find(event => event.kind === "end" && belongsToTask(event));
+    const assessment = review.assessments.find(belongsToTask);
+    const evidence = assessment?.evidence.filter(frame => frames.has(frame) && belongsToTask(frames.get(frame))) ?? [];
+    const evaluated = evidence.length > 0 ? assessment : undefined;
+    const last = events.findLast(event => event.kind === "frame" && belongsToTask(event));
+    return {
+      persona: persona.id,
+      task,
+      outcome: [end?.status, evaluated?.outcome].find(status => Object.hasOwn(outcome, status)) ?? "uncertain",
+      flow: evaluated?.flow ?? "unknown",
+      note: evaluated?.note ?? "",
+      evidence: evidence.length ? evidence : [last?.frame].filter(Boolean),
+    };
+  }));
+}
+
+function judgedFindings({ frames, review }) {
+  return review.findings
+    .map(finding => ({ ...finding, evidence: [...new Set(finding.evidence)].filter(frame => frames.has(frame)) }))
+    .filter(finding => finding.evidence.length)
+    .slice(0, 3);
+}
+
+export function renderReport({ report, people, events }) {
+  const { origin, effort, reviewError, tasks, findings } = report;
+  const frames = reportFrames(events);
+  const links = (ids) => [...new Set(ids)].filter(id => frames.has(id)).map(id => `[${id}](${frames.get(id).image})`).join(", ");
   const lines = [
     "# 연어 UT 결과",
     "",
@@ -315,31 +337,57 @@ after가 null이면 해당 행동 뒤 화면이 기록되지 않았습니다. �
   lines.push("", "## 목표 기반 UT", "", "| 참가자 | 목표 | 결과 | 동선 | 관찰 및 화면 |", "|---|---|---|---|---|");
   for (const persona of people) {
     for (const [id, label] of [["arrival", "도착·좌석 정보"], ["return", "다시 찾기"]]) {
-      const end = events.find(event => event.kind === "end" && event.persona === persona.id && event.task === id);
-      const matching = (assessment) => assessment.persona === persona.id && assessment.task === id;
-      const assessment = review.assessments.find(matching);
-      const evidence = assessment?.evidence.filter(frame => frames.get(frame)?.persona === persona.id && frames.get(frame)?.task === id) ?? [];
-      const evaluated = evidence.length > 0 ? assessment : undefined;
-      const status = outcome[end?.status] ?? outcome[evaluated?.outcome] ?? outcome.uncertain;
-      const last = events.findLast(event => event.kind === "frame" && event.persona === persona.id && event.task === id);
-      lines.push(`| ${personaNames[persona.id] ?? persona.id} | ${label} | ${status} | ${flow[evaluated?.flow] ?? flow.unknown} | ${markdown(evaluated?.note ?? "")} ${links(evidence.length ? evidence : [last?.frame])} |`);
+      const judged = tasks.find(({ persona: judgedPersona, task }) => judgedPersona === persona.id && task === id);
+      lines.push(`| ${personaNames[persona.id] ?? persona.id} | ${label} | ${outcome[judged.outcome]} | ${flow[judged.flow] ?? flow.unknown} | ${markdown(judged.note)} ${links(judged.evidence)} |`);
     }
   }
   lines.push("", "## 주요 관찰", "");
-  const findings = review.findings.filter(finding => links(finding.evidence)).slice(0, 3);
   if (reviewError) lines.push(`판정 생성 실패 · ${markdown(reviewError)}`);
   else if (!findings.length) lines.push("기록을 근거로 정리된 발견이 없습니다.");
   for (const finding of findings) {
     lines.push(`- 관찰 · ${markdown(finding.observed)} ${links(finding.evidence)}\n  해석 · ${markdown(finding.interpretation)}`);
   }
   lines.push("", "## 인터뷰와 그룹 대화", "", "[개별 인터뷰](interviews.md) · [그룹 대화](discussion.md) · [전체 행동 로그](events.jsonl)", "", "합성 참가자의 관찰은 실제 사용자 UT에서 확인할 가설입니다.", "");
+  return lines.join("\n");
+}
+
+async function replaceFile(directory, file, contents) {
   const temporary = join(directory, `.${file}.${randomUUID()}.tmp`);
   try {
-    await writeFile(temporary, lines.join("\n"));
+    await writeFile(temporary, contents);
     await rename(temporary, join(directory, file));
   } finally {
     await rm(temporary, { force: true });
   }
+}
+
+export async function writeReport({ model, people, events, directory, origin, name = "report", effort = "medium" }) {
+  const regenerating = name !== "report";
+  const frames = reportFrames(events);
+  if (regenerating && !frames.size) throw new Error("재분석할 화면 기록이 없습니다.");
+  let review = { assessments: [], findings: [] };
+  let reviewError = null;
+  if (frames.size) {
+    try {
+      review = await requestReview({ model, people, events, directory, frames, effort });
+    } catch (error) {
+      if (regenerating) throw error;
+      reviewError = clean(error.message);
+    }
+  }
+  const report = {
+    origin,
+    model: modelId,
+    effort,
+    generatedAt: new Date().toISOString(),
+    reviewError,
+    tasks: judgedTasks({ people, events, frames, review }),
+    findings: judgedFindings({ frames, review }),
+  };
+  const rendered = renderReport({ report, people, events });
+  // The viewer treats report.md as the finished signal, so the judgment must land first.
+  await replaceFile(directory, `${name}.json`, JSON.stringify(report, null, 2) + "\n");
+  await replaceFile(directory, `${name}.md`, rendered);
 }
 
 export async function regenerateReport({ model, runId, root = "runs", effort = "medium" }) {
@@ -352,9 +400,9 @@ export async function regenerateReport({ model, runId, root = "runs", effort = "
   ]);
   const { people, origin } = JSON.parse(run);
   const events = parseEvents(log);
-  const file = `report-${effort}.md`;
-  await writeReport({ model, people, events, directory, origin, file, effort });
-  return join(directory, file);
+  const name = `report-${effort}`;
+  await writeReport({ model, people, events, directory, origin, name, effort });
+  return join(directory, `${name}.md`);
 }
 
 export async function launchStudy(options) {
