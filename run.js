@@ -384,9 +384,10 @@ export async function writeReport({ model, people, events, directory, origin, na
     tasks: judgedTasks({ people, events, frames, review }),
     findings: judgedFindings({ frames, review }),
   };
+  const rendered = renderReport({ report, people, events });
   // The viewer treats report.md as the finished signal, so the judgment must land first.
   await replaceFile(directory, `${name}.json`, JSON.stringify(report, null, 2) + "\n");
-  await replaceFile(directory, `${name}.md`, renderReport({ report, people, events }));
+  await replaceFile(directory, `${name}.md`, rendered);
 }
 
 export async function regenerateReport({ model, runId, root = "runs", effort = "medium" }) {

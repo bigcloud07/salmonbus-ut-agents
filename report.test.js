@@ -65,6 +65,23 @@ test("서비스가 기록한 종료 상태는 관찰자 판정보다 우선한�
   assert.equal(tasks[0].outcome, "execution_error");
 });
 
+test("재분석 리포트를 그리지 못하면 기존 판정을 건드리지 않는다", async t => {
+  const root = await mkdtemp(join(tmpdir(), "salmonbus-regenerate-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, "saved-run");
+  const free = { ...screen("P1-free-01", "free"), path: undefined };
+  await mkdir(join(directory, "screens"), { recursive: true });
+  await Promise.all([events[0], free].map(({ image }) => writeFile(join(directory, image), "png")));
+  await writeFile(join(directory, "run.json"), JSON.stringify({ people, origin: "https://www.salmonbus.com" }));
+  await writeFile(join(directory, "events.jsonl"), [events[0], free].map(event => JSON.stringify(event)).join("\n") + "\n");
+  await writeFile(join(directory, "report-low.json"), "{}\n");
+  const model = { respond: async () => ({ assessments: [], findings: [] }) };
+
+  await assert.rejects(regenerateReport({ model, runId: "saved-run", root, effort: "low" }), { name: "TypeError" });
+
+  assert.equal(await readFile(join(directory, "report-low.json"), "utf8"), "{}\n");
+});
+
 test("재분석이 실패하면 기존 판정을 건드리지 않는다", async t => {
   const root = await mkdtemp(join(tmpdir(), "salmonbus-regenerate-"));
   t.after(() => rm(root, { recursive: true, force: true }));

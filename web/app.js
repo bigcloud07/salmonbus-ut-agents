@@ -267,7 +267,7 @@ function renderReports() {
     preview.innerHTML = details.reportPreviews[file];
     return [download, preview, el("pre", contents, "report-source")];
   };
-  const defaultIsMedium = details.judgments["report.md"]?.effort === "medium";
+  const defaultIsMedium = details.judgments?.["report.md"]?.effort === "medium";
   const medium = details.reviewReport ?? (defaultIsMedium ? details.report : null);
   const comparison = el("div", undefined, "report-comparison");
   for (const [effort, contents, file] of [

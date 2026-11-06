@@ -42,6 +42,14 @@ const files = {
   "/styles.css": ["styles.css", "text/css; charset=utf-8"],
 };
 
+function parseJudgment(source) {
+  try {
+    return source && JSON.parse(source);
+  } catch {
+    return null;
+  }
+}
+
 async function readOptional(path, encoding) {
   try {
     return await readFile(path, encoding);
@@ -217,7 +225,7 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
           ].filter(([, markdown]) => markdown !== null).map(([file, markdown]) => [file, reportMarkdown.render(markdown, { id })]));
           const judgments = Object.fromEntries(await Promise.all(["report", "report-medium", "report-low"].map(async name => {
             const judgment = await readRun(id, `${name}.json`, "utf8");
-            return [`${name}.md`, judgment && JSON.parse(judgment)];
+            return [`${name}.md`, parseJudgment(judgment)];
           })));
           return json(200, { run: JSON.parse(metadata), events: parseEvents(log ?? ""), report, reviewReport, lowReport, reportPreviews, judgments });
         }

@@ -113,6 +113,8 @@ test("리포트 위치는 판정 파일로 정하고 판정 파일이 없는 실
   };
   await save("2026-11-04T03-00-00-000Z-11111111", "# 판정 없는 기존 리포트\n");
   await save("2026-11-04T04-00-00-000Z-22222222", "# 판정 있는 리포트\n", { effort: "medium", tasks: [], findings: [] });
+  await save("2026-11-04T02-00-00-000Z-33333333", "# 판정 파일이 깨진 리포트\n");
+  await writeFile(join(root, "2026-11-04T02-00-00-000Z-33333333", "report.json"), "{");
   const server = createViewer({ root });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => {
@@ -132,6 +134,18 @@ test("리포트 위치는 판정 파일로 정하고 판정 파일이 없는 실
   await page.locator("[data-run='2026-11-04T03-00-00-000Z-11111111']").click();
   await page.getByText("이전 리포트 보기").waitFor();
   await page.getByRole("heading", { name: "판정 없는 기존 리포트" }).waitFor();
+
+  await page.locator("[data-run='2026-11-04T02-00-00-000Z-33333333']").click();
+  await page.getByRole("heading", { name: "판정 파일이 깨진 리포트" }).waitFor();
+
+  await page.route("**/api/runs/2026-11-04T04-00-00-000Z-22222222", async route => {
+    const response = await route.fetch(), json = await response.json();
+    delete json.judgments;
+    await route.fulfill({ response, json });
+  });
+  await page.locator("[data-run='2026-11-04T04-00-00-000Z-22222222']").click();
+  await page.getByText("이전 리포트 보기").waitFor();
+  await page.getByRole("heading", { name: "판정 있는 리포트" }).waitFor();
 });
 
 test("웹에서 UT를 시작하고 추가 질문과 재분석을 같은 실행에 저장한다", async t => {
