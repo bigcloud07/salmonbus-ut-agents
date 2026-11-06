@@ -8,7 +8,6 @@ import { createViewer } from "./viewer.js";
 
 async function openFailureViewer(t) {
   const root = await mkdtemp(join(tmpdir(), "salmonbus-render-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const id = "2026-11-04T03-00-00-000Z-aabbccdd";
   const addRun = async (id, person) => {
     const directory = join(root, id);
@@ -21,15 +20,20 @@ async function openFailureViewer(t) {
   await writeFile(join(root, id, "screens/P1-free-01.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jh1sAAAAASUVORK5CYII=", "base64"));
   const server = createViewer({ root });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
   const browser = await chromium.launch();
-  t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 400 } });
   page.setDefaultTimeout(5000);
   const renderErrors = [], pageErrors = [];
   page.on("console", message => { if (message.type() === "error" && message.text().startsWith("화면을 그리지 못했습니다.")) renderErrors.push(message.text()); });
   page.on("pageerror", error => pageErrors.push(error));
-  t.after(() => assert.deepEqual(pageErrors, []));
+  t.after(async () => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await browser.close();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+    assert.deepEqual(pageErrors, []);
+  });
   const polls = async count => {
     for (let poll = 0; poll < count; poll++) await page.waitForResponse(response => response.url().endsWith("/api/control"));
   };
