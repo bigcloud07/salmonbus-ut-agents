@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { after, describe, mock, test } from "node:test";
+import { after, before, describe, mock, test } from "node:test";
 import { promisify } from "node:util";
 import { syncWorker } from "./api/host.js";
 
@@ -82,6 +82,7 @@ if [ "\${UT_TEST_CRASH:-0}" = 1 ] && [ ! -f "$UT_TEST_ROOT/crashed" ]; then touc
 
 describe("지속 워커를 배포 버전에 맞춘다", { concurrency: 6 }, () => {
   const logger = mock.method(console, "error", (...args) => output.getStore()?.push(args)); after(() => logger.mock.restore());
+  before(() => { process.env.VERCEL_ENV = "production"; }); after(() => { delete process.env.VERCEL_ENV; });
   for (const control of [{ version: "next" }, { busy: true }, { state: "running" }]) {
     test(control.version ? "같은 버전이면 파일과 프로세스를 건드리지 않는다" : control.busy ? "작업 중이면 교체하지 않는다" : "기존 뷰어가 실행 중이어도 교체하지 않는다", async t => {
       const worker = await setup(t, { control }); await worker.sync();
@@ -154,4 +155,25 @@ describe("지속 워커를 배포 버전에 맞춘다", { concurrency: 6 }, () =
       if (exitCode === 0) assert.equal(worker.errors[0][0], "UT Sandbox 버전 불일치");
     });
   }
+});
+
+describe("운영이 아닌 배포는 워커 코드를 바꾸지 않는다", () => {
+  const useEnvironment = (t, environment) => {
+    if (environment) process.env.VERCEL_ENV = environment; else delete process.env.VERCEL_ENV;
+    t.after(() => { delete process.env.VERCEL_ENV; });
+  };
+  for (const environment of ["preview", "development", undefined]) {
+    test(`${environment ?? "환경 미설정"}에서는 버전이 달라도 유휴 워커를 교체하지 않는다`, async t => {
+      useEnvironment(t, environment);
+      const worker = await setup(t); assert.match(await worker.sync(), /^http:/);
+      assert.deepEqual(worker.writes, []); assert.deepEqual(worker.commands, []);
+      assert.equal(await worker.read("viewer.js"), workerSource("old")); assert.equal(await worker.log(), "");
+    });
+  }
+  test("워커가 응답하지 않으면 코드를 바꾸지 않고 시작만 한다", async t => {
+    useEnvironment(t, "preview");
+    const worker = await setup(t); await worker.close(); assert.match(await worker.sync(), /^http:/);
+    assert.deepEqual(worker.writes, []); assert.deepEqual(worker.commands.map(command => command.detached), [true]);
+    assert.equal(await worker.read("viewer.js"), workerSource("old")); assert.equal(await worker.log(), "start\n");
+  });
 });

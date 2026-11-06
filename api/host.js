@@ -84,7 +84,17 @@ export async function syncWorker(sandbox, { key, bundle, port = 4310, attempts =
     }
     return control;
   };
+  const restart = async target => {
+    await startWorker(sandbox, key);
+    const ready = await poll(target);
+    if (!ready) throw new Error("Sandbox viewer did not start");
+    return ready;
+  };
   const control = await poll();
+  if (process.env.VERCEL_ENV !== "production") {
+    if (!control) await restart();
+    return domain;
+  }
   if (control && (control.version === bundle.version || control.busy || control.state === "running")) return domain;
   let applied = false;
   try {
@@ -102,9 +112,7 @@ export async function syncWorker(sandbox, { key, bundle, port = 4310, attempts =
   } catch (error) {
     console.error("UT Sandbox 동기화 실패", error.exitCode ?? null, error.message.replaceAll(key, "[숨김]").split("\n")[0]);
   }
-  await startWorker(sandbox, key);
-  const ready = await poll(applied ? bundle.version : null);
-  if (!ready) throw new Error("Sandbox viewer did not start");
+  const ready = await restart(applied ? bundle.version : null);
   if (applied && ready.version !== bundle.version) console.error("UT Sandbox 버전 불일치", ready.version ?? null);
   return domain;
 }
