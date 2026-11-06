@@ -43,6 +43,16 @@ a { color: var(--accent); }
 .top a:hover { background: var(--ink); color: #fff; }
 .top .brand { font-weight: 780; letter-spacing: -.04em; }
 .sync:not(:empty) { padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: .8rem; }
+.render-error:not(:empty) {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 10px 12px;
+  background: var(--ink);
+  color: #fff;
+}
 
 main { width: min(1560px, 100%); margin: 0 auto; padding: 0 12px 56px; }
 .overview { margin-bottom: 24px; }
