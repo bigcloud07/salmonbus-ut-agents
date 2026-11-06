@@ -6,6 +6,206 @@ import { test } from "node:test";
 import { chromium } from "playwright";
 import { createViewer } from "./viewer.js";
 
+async function openFailureViewer(t) {
+  const root = await mkdtemp(join(tmpdir(), "salmonbus-render-"));
+  const id = "2026-11-04T03-00-00-000Z-aabbccdd";
+  const addRun = async (id, person) => {
+    const directory = join(root, id);
+    await mkdir(join(directory, "screens"), { recursive: true });
+    await writeFile(join(directory, "run.json"), JSON.stringify({ id, people: [{ id: person }] }) + "\n");
+    await writeFile(join(directory, "report.md"), "# 관찰 결과\n\n노선 목록을 확인했습니다.\n");
+  };
+  await addRun(id, "P1");
+  await writeFile(join(root, id, "events.jsonl"), JSON.stringify({ kind: "frame", persona: "P1", task: "free", frame: "P1-free-01", path: "/" }) + "\n");
+  await writeFile(join(root, id, "screens/P1-free-01.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jh1sAAAAASUVORK5CYII=", "base64"));
+  const server = createViewer({ root });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1280, height: 400 } });
+  page.setDefaultTimeout(5000);
+  const renderErrors = [], pageErrors = [];
+  page.on("console", message => { if (message.type() === "error" && message.text().startsWith("화면을 그리지 못했습니다.")) renderErrors.push(message.text()); });
+  page.on("pageerror", error => pageErrors.push(error));
+  t.after(async () => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await browser.close();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+    assert.deepEqual(pageErrors, []);
+  });
+  const polls = async count => {
+    for (let poll = 0; poll < count; poll++) await page.waitForResponse(response => response.url().endsWith("/api/control"));
+  };
+  await page.addInitScript(() => {
+    const nativeTimeout = window.setTimeout;
+    window.setTimeout = (callback, delay, ...rest) => nativeTimeout(callback, delay === 1500 ? 50 : delay, ...rest);
+  });
+  const faults = new Map();
+  await page.route("**/api/**", async route => {
+    const fault = faults.get("all") ?? faults.get(new URL(route.request().url()).pathname);
+    await (fault ? fault(route) : route.continue());
+  });
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator("[data-frame]").waitFor();
+  const breakDetail = async route => {
+    const response = await route.fetch(), json = await response.json();
+    delete json.reportPreviews;
+    await route.fulfill({ response, json });
+  };
+  return { page, root, id, detailPath: `/api/runs/${id}`, faults, addRun, breakDetail, polls, renderErrors, alert: page.getByRole("alert"), sync: page.locator("#sync") };
+}
+
+test("상세 렌더 오류는 연결 장애와 별도로 유지되고 같은 정상 응답으로 복구된다", async t => {
+  const { page, detailPath, faults, breakDetail, polls, renderErrors, alert, sync } = await openFailureViewer(t);
+  faults.set("all", route => route.abort());
+  await sync.getByText("기록 연결 확인 중").waitFor();
+  assert.equal(await alert.textContent(), "");
+  faults.delete("all");
+  await sync.waitFor({ state: "hidden" });
+  assert.equal(await alert.textContent(), "");
+  faults.set(detailPath, breakDetail);
+  await page.getByText(/화면을 그리지 못했습니다/).waitFor();
+  await page.evaluate(() => {
+    window.renderErrorMutations = 0;
+    new MutationObserver(records => { window.renderErrorMutations += records.length; }).observe(document.querySelector("#render-error"), { childList: true, characterData: true, subtree: true });
+  });
+  await polls(3);
+  assert.equal(await page.evaluate(() => window.renderErrorMutations), 0);
+  assert.equal(await alert.isVisible(), true);
+  assert.equal(await sync.textContent(), "");
+  assert.equal(renderErrors.length, 1);
+  assert.match(renderErrors[0], /TypeError.*report\.md/s);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  assert.ok(await page.evaluate(() => scrollY > 0));
+  const bounds = await alert.boundingBox();
+  assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 1280 && bounds.y + bounds.height <= 400);
+  faults.set("all", route => route.abort());
+  await sync.getByText("기록 연결 확인 중").waitFor();
+  assert.equal(await alert.isVisible(), true);
+  faults.delete("all");
+  await sync.waitFor({ state: "hidden" });
+  assert.equal(await alert.isVisible(), true);
+  assert.equal(renderErrors.length, 1);
+  faults.delete(detailPath);
+  await alert.waitFor({ state: "hidden" });
+  await page.locator('[data-view="report"]').click();
+  await page.getByText("노선 목록을 확인했습니다.", { exact: true }).waitFor();
+});
+
+test("상세에 의한 목록 실패는 포커스를 유지하고 제어 응답 복구도 다시 그린다", async t => {
+  const { page, root, id, detailPath, faults, addRun, breakDetail, polls, renderErrors, alert } = await openFailureViewer(t);
+  faults.set(detailPath, breakDetail);
+  await alert.waitFor();
+  const second = "2026-11-03T03-00-00-000Z-aabbccdd", third = "2026-11-02T03-00-00-000Z-aabbccdd";
+  await addRun(second, "P2");
+  const button = page.locator(`[data-run="${second}"]`);
+  await button.waitFor();
+  assert.equal(await alert.isVisible(), true);
+  const focused = await button.elementHandle(), logged = renderErrors.length;
+  await focused.focus();
+  await polls(3);
+  assert.equal(await focused.evaluate(element => element === document.activeElement), true);
+  assert.equal(renderErrors.length, logged);
+  faults.delete(detailPath);
+  await alert.waitFor({ state: "hidden" });
+  faults.set("/api/runs", async route => {
+    const response = await route.fetch(), runs = await response.json();
+    await route.fulfill({ response, json: runs.map(run => ({ ...run, people: null })) });
+  });
+  await alert.waitFor();
+  faults.delete("/api/runs");
+  await alert.waitFor({ state: "hidden" });
+  for (const [change, content] of [
+    [() => addRun(third, "P3"), page.locator(`[data-run="${third}"]`)],
+    [() => writeFile(join(root, id, "report.md"), "# 관찰 결과\n\n노선 목록이 바뀌었습니다.\n"), page.getByText("노선 목록이 바뀌었습니다.", { exact: true })],
+  ]) {
+    faults.set("/api/control", route => route.fulfill({ body: "null", contentType: "application/json" }));
+    await alert.waitFor();
+    await change();
+    await polls(3);
+    assert.equal(await alert.isVisible(), true);
+    assert.equal(await content.count(), 0);
+    faults.delete("/api/control");
+    await alert.waitFor({ state: "hidden" });
+    await content.waitFor({ state: "attached" });
+  }
+});
+
+test("실행을 바꾸면 이전 실행의 기록이 남지 않는다", async t => {
+  const { page, root, id, faults, addRun, alert } = await openFailureViewer(t);
+  await appendFile(join(root, id, "events.jsonl"), JSON.stringify({
+    kind: "tap_target", persona: "P1", task: "free", frame: "P1-free-01", x: 0, y: 0, viewport: { width: 1, height: 1 },
+  }) + "\n");
+  const capture = page.locator("#capture");
+  await page.locator("#events [data-frame]").first().waitFor();
+  await capture.waitFor();
+  await page.locator("#tap-marker").waitFor();
+  assert.notEqual(await page.locator("#events").textContent(), "");
+  assert.notEqual(await page.locator("#frame-info").textContent(), "");
+  assert.equal(await capture.getAttribute("src"), `/api/runs/${id}/screens/P1-free-01.png`);
+  assert.equal(await page.locator("#screen").evaluate(element => element.classList.contains("has-image")), true);
+  const second = "2026-11-03T03-00-00-000Z-aabbccdd";
+  await addRun(second, "P2");
+  await page.locator('[data-view="report"]').click();
+  await page.getByText("노선 목록을 확인했습니다.", { exact: true }).waitFor();
+  faults.set(`/api/runs/${second}`, async route => {
+    const response = await route.fetch();
+    const detail = await response.json();
+    detail.events = null;
+    await route.fulfill({ response, json: detail });
+  });
+  await page.locator('[data-view="activity"]').click();
+  await page.locator(`[data-run="${second}"]`).click();
+  await alert.waitFor();
+  assert.equal(await page.locator("#events").textContent(), "");
+  assert.equal(await capture.getAttribute("src"), null);
+  assert.equal(await capture.evaluate(image => image.hidden), true);
+  assert.equal(await page.locator("#tap-marker").evaluate(element => element.hidden), true);
+  assert.equal(await page.locator("#screen").evaluate(element => element.classList.contains("has-image")), false);
+  assert.equal(await page.locator("#frame-info").textContent(), "");
+  await capture.evaluate(image => {
+    image.dispatchEvent(new Event("load"));
+    image.dispatchEvent(new Event("error"));
+  });
+  assert.equal(await capture.evaluate(image => image.hidden), true);
+  assert.equal(await page.locator("#tap-marker").evaluate(element => element.hidden), true);
+  assert.equal(await page.locator("#report-records").textContent(), "");
+  assert.equal(await page.locator("#interview-records").textContent(), "");
+  assert.equal(await page.locator("#discussion-records").textContent(), "");
+});
+
+test("실패한 실행으로 돌아오면 다시 그린다", async t => {
+  const { page, id, detailPath, faults, addRun, breakDetail, renderErrors, alert } = await openFailureViewer(t);
+  const second = "2026-11-03T03-00-00-000Z-aabbccdd";
+  await addRun(second, "P2");
+  const secondButton = page.locator(`[data-run="${second}"]`);
+  await secondButton.waitFor();
+  faults.set(detailPath, breakDetail);
+  await alert.waitFor();
+  faults.set(`/api/runs/${second}`, route => route.abort());
+  await secondButton.click();
+  await page.locator("#detail").waitFor({ state: "hidden" });
+  const previousErrorCount = renderErrors.length;
+  await page.locator(`[data-run="${id}"]`).click();
+  await page.locator("#detail").waitFor();
+  assert.ok(renderErrors.length > previousErrorCount);
+  assert.equal(await alert.isVisible(), true);
+});
+
+test("정상 폴링과 장면 선택은 접어 둔 이전 리포트 요소를 유지한다", async t => {
+  const { page, polls, alert } = await openFailureViewer(t);
+  await page.locator('[data-view="report"]').click();
+  const original = await page.locator("#report-records details[open]").elementHandle();
+  await page.getByText("이전 리포트 보기", { exact: true }).click();
+  await page.locator('[data-view="activity"]').click();
+  await page.locator("[data-frame]").click();
+  await page.locator('[data-view="report"]').click();
+  await polls(3);
+  assert.equal(await original.evaluate(element => element === document.querySelector("#report-records details") && !element.open), true);
+  assert.equal(await alert.textContent(), "");
+});
+
 test("웹 관찰실은 새 실행을 발견하고 선택한 장면을 유지하며 대화와 리포트를 표시한다", async t => {
   const root = await mkdtemp(join(tmpdir(), "salmonbus-viewer-"));
   t.after(() => rm(root, { recursive: true, force: true }));

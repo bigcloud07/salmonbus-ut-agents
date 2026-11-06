@@ -17,6 +17,8 @@ let details;
 let runList;
 let listVersion;
 let detailVersion;
+let controlVersion;
+const failedRenders = new Map();
 let control = {};
 let starting = false;
 let launchError = "";
@@ -39,6 +41,20 @@ function setSync(online) {
   const status = $("sync");
   const message = online ? "" : "기록 연결 확인 중";
   if (status.textContent !== message) status.textContent = message;
+}
+
+function renderResponse(slot, response, render) {
+  if (failedRenders.get(slot) === response) return false;
+  try {
+    render();
+    failedRenders.delete(slot);
+  } catch (error) {
+    failedRenders.set(slot, response);
+    console.error("화면을 그리지 못했습니다.", error);
+  }
+  const message = failedRenders.size ? "화면을 그리지 못했습니다. 새로고침해도 계속되면 개발자 콘솔을 확인해 주세요." : "";
+  if ($("render-error").textContent !== message) $("render-error").textContent = message;
+  return !failedRenders.has(slot);
 }
 
 function runDate(id) {
@@ -100,8 +116,18 @@ function chooseRun(id) {
   pinnedFrame = undefined;
   details = undefined;
   detailVersion = undefined;
+  failedRenders.delete("detail");
+  $("events").replaceChildren();
+  $("capture").removeAttribute("src");
+  $("capture").hidden = true;
+  $("tap-marker").hidden = true;
+  $("screen").classList.remove("has-image");
+  $("frame-info").textContent = "";
   $("interview-form").reset();
   $("interview-feedback").textContent = "";
+  $("interview-records").replaceChildren();
+  $("discussion-records").replaceChildren();
+  $("report-records").replaceChildren();
   $("interview-records").scrollTop = 0;
   $("discussion-records").scrollTop = 0;
   $("review-feedback").textContent = "";
@@ -323,8 +349,7 @@ async function loadDetail(id) {
   const data = await getText(`/api/runs/${encodeURIComponent(id)}`);
   if (id !== selected || data === detailVersion) return;
   details = JSON.parse(data);
-  detailVersion = data;
-  renderDetail();
+  detailVersion = renderResponse("detail", `${data}\n${controlVersion}`, renderDetail) ? data : undefined;
 }
 
 $("runs").addEventListener("click", event => {
@@ -450,29 +475,34 @@ async function refresh() {
   try {
     const [data, status] = await Promise.all([getText("/api/runs"), getText("/api/control")]);
     control = JSON.parse(status);
+    controlVersion = status;
+    const renderList = () => {
+      const rendered = renderResponse("list", `${data}\n${status}\n${detailVersion}`, () => {
+        renderRuns();
+        renderDetail();
+      });
+      listVersion = rendered ? data : undefined;
+    };
     if (data !== listVersion) {
       runList = JSON.parse(data);
-      listVersion = data;
       if (!pinnedRun || !runList.some(run => run.id === selected)) {
         pinnedRun = false;
         chooseRun(runList[0]?.id);
       }
-      renderRuns();
-      renderDetail();
+      renderList();
     }
     if (followJob !== undefined && control.job === followJob) {
       if (runList.some(run => run.id === control.id)) {
         pinnedRun = true;
         chooseRun(control.id);
         showView("activity");
-        renderRuns();
-        renderDetail();
+        renderList();
         followJob = undefined;
       } else if (control.state === "failed") {
         followJob = undefined;
       }
     }
-    renderLaunch();
+    renderResponse("launch", status, renderLaunch);
     if (selected) await loadDetail(selected);
     setSync(true);
   } catch {
