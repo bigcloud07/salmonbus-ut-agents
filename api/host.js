@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { Sandbox } from "@vercel/sandbox";
 
 const port = 4310;
@@ -10,6 +11,42 @@ const assets = new Map([
 ]);
 const workerFiles = ["viewer.js", "run.js", "study.js", "model.js", "browser.js",
   "package.json", "package-lock.json", "data/nemotron-personas-korea.json"];
+const files = await Promise.all(workerFiles.map(async path => ({ path, content: await readFile(path) })));
+const hash = createHash("sha256");
+for (const file of files) hash.update(file.path).update("\0").update(file.content).update("\0");
+const bundle = { version: hash.digest("hex"), commit: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+  lockHash: createHash("sha256").update(files.find(file => file.path === "package-lock.json").content).digest("hex"), files };
+const applyScript = String.raw`
+set -eu
+stage=.ut-update/$UT_WORKER_VERSION
+probe() {
+  node -e 'fetch(process.env.UT_CONTROL_URL, { headers: { "x-ut-proxy-key": process.env.UT_SANDBOX_PROXY_KEY }, signal: AbortSignal.timeout(2000) }).then(async response => {
+    if (!response.ok) throw new Error("상태 확인 실패");
+    const control = await response.json();
+    process.exit(control.version === process.env.UT_WORKER_VERSION ? 10 : control.busy || control.state === "running" ? 75 : 0);
+  }).catch(error => process.exit(error.cause?.code === "ECONNREFUSED" ? 0 : 75));' || {
+    status=$?; if [ "$status" -eq 10 ]; then rm -rf "$stage"; exit 0; fi; exit "$status"
+  }
+}
+probe
+if [ "$(cat .ut-installed-lock 2>/dev/null || true)" != "$UT_LOCK_HASH" ]; then
+  (cd "$stage"; npm ci --omit=dev; npx playwright install --with-deps chromium)
+fi
+probe
+pkill -TERM -f '(^|/)node viewer\.js$' || { status=$?; [ "$status" -eq 1 ] || exit "$status"; }
+flock -w 5 .ut-viewer.lock true || exit 76
+if [ -d "$stage/node_modules" ]; then
+  rm -rf node_modules
+  mv "$stage/node_modules" node_modules
+  printf '%s' "$UT_LOCK_HASH" > .ut-installed-lock
+fi
+if [ "$(cat worker-version.json 2>/dev/null || true)" != "$UT_WORKER_STAMP" ]; then
+  rm -f worker-version.json
+  cp -R "$stage"/. .
+  printf '%s' "$UT_WORKER_STAMP" > worker-version.json
+fi
+rm -rf "$stage"
+`;
 const noCache = {
   "Cache-Control": "private, no-store",
   "X-Content-Type-Options": "nosniff",
@@ -31,6 +68,55 @@ async function startWorker(sandbox, key) {
   });
 }
 
+export async function syncWorker(sandbox, { key, bundle, port = 4310, attempts = 25, delay = 400 }) {
+  const domain = sandbox.domain(port);
+  const poll = async target => {
+    let control = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const response = await fetch(`${domain}/api/control`, {
+          headers: { "x-ut-proxy-key": key }, signal: AbortSignal.timeout(2500),
+        });
+        if (response.ok) { control = await response.json(); if (!target || control.version === target) return control; }
+        else await response.body?.cancel();
+      } catch {}
+      if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    return control;
+  };
+  const restart = async target => {
+    await startWorker(sandbox, key);
+    const ready = await poll(target);
+    if (!ready) throw new Error("Sandbox viewer did not start");
+    return ready;
+  };
+  const control = await poll();
+  if (process.env.VERCEL_ENV !== "production") {
+    if (!control) await restart();
+    return domain;
+  }
+  if (control && (control.version === bundle.version || control.busy || control.state === "running")) return domain;
+  let applied = false;
+  try {
+    await sandbox.writeFiles(bundle.files.map(file => ({ ...file, path: `.ut-update/${bundle.version}/${file.path}` })));
+    const command = await sandbox.runCommand({ cmd: "flock", args: ["-w", "120", ".ut-sync.lock", "sh", "-c", applyScript],
+      env: { UT_SANDBOX_PROXY_KEY: key, UT_WORKER_VERSION: bundle.version, UT_WORKER_STAMP: JSON.stringify({ version: bundle.version, commit: bundle.commit }),
+        UT_LOCK_HASH: bundle.lockHash, UT_CONTROL_URL: `http://127.0.0.1:${port}/api/control` } });
+    if (command.exitCode === 75) return domain;
+    if (command.exitCode === 76) {
+      console.error("UT Sandbox 워커가 종료되지 않았습니다.");
+      return domain;
+    }
+    if (command.exitCode !== 0) throw Object.assign(new Error(await command.stderr()), { exitCode: command.exitCode });
+    applied = true;
+  } catch (error) {
+    console.error("UT Sandbox 동기화 실패", error.exitCode ?? null, error.message.replaceAll(key, "[숨김]").split("\n")[0]);
+  }
+  const ready = await restart(applied ? bundle.version : null);
+  if (applied && ready.version !== bundle.version) console.error("UT Sandbox 버전 불일치", ready.version ?? null);
+  return domain;
+}
+
 async function connectWorker(key) {
   const sandbox = await Sandbox.getOrCreate({
     name: workerName,
@@ -42,25 +128,18 @@ async function connectWorker(key) {
     keepLastSnapshots: { count: 1, expiration: 0 },
     resume: true,
     onCreate: async instance => {
-      await instance.writeFiles(await Promise.all(workerFiles.map(async path => ({ path, content: await readFile(path) }))));
+      await instance.writeFiles(bundle.files);
       await install(instance, "npm", ["ci", "--omit=dev"]);
       await install(instance, "npx", ["playwright", "install", "--with-deps", "chromium"]);
+      await instance.writeFiles([
+        { path: "worker-version.json", content: JSON.stringify({ version: bundle.version, commit: bundle.commit }) },
+        { path: ".ut-installed-lock", content: bundle.lockHash },
+      ]);
       await startWorker(instance, key);
     },
     onResume: instance => startWorker(instance, key),
   });
-  const domain = sandbox.domain(port);
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    try {
-      const probe = await fetch(`${domain}/api/control`, {
-        headers: { "x-ut-proxy-key": key }, signal: AbortSignal.timeout(2500),
-      });
-      await probe.body?.cancel();
-      if (probe.ok) return { domain, key };
-    } catch { /* Sandbox port may not be ready yet. */ }
-    await new Promise(resolve => setTimeout(resolve, 400));
-  }
-  throw new Error("Sandbox viewer did not start");
+  return { domain: await syncWorker(sandbox, { key, bundle }), key };
 }
 
 function worker(key) {

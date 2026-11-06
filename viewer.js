@@ -71,7 +71,7 @@ function message(error) {
   return error.message.split("\n")[0].slice(0, 220);
 }
 
-export function createViewer({ root = "runs", makeModel = createModel, startStudy = launchStudy, proxyKey } = {}) {
+export function createViewer({ root = "runs", makeModel = createModel, startStudy = launchStudy, proxyKey, worker = { version: null, commit: null } } = {}) {
   const runs = resolve(root);
   let study = { state: "idle", id: null };
   let nextJob = 0;
@@ -90,7 +90,7 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
     }
   };
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     const send = (status, type, body) => {
       response.writeHead(status, {
         "Content-Type": type,
@@ -203,7 +203,7 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
         return json(200, records.filter(Boolean));
       }
       if (path === "/api/control") {
-        return json(200, { ...study, hasKey: Boolean(process.env.OPENAI_API_KEY?.trim()), personaNames });
+        return json(200, { ...study, ...worker, busy: server.busy(), hasKey: Boolean(process.env.OPENAI_API_KEY?.trim()), personaNames });
       }
       const run = path.match(runPath);
       if (run) {
@@ -230,10 +230,15 @@ export function createViewer({ root = "runs", makeModel = createModel, startStud
       return json(500, { error: "기록을 읽지 못했습니다." });
     }
   });
+  server.busy = () => study.state === "running" || interviews.size > 0 || reviews.size > 0;
+  return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const proxyKey = process.env.UT_SANDBOX_PROXY_KEY;
-  createViewer({ proxyKey }).listen(4310, proxyKey ? "0.0.0.0" : "127.0.0.1",
-    () => console.log("연어 UT 뷰어 · http://127.0.0.1:4310"));
+  const stamp = await readOptional(new URL("./worker-version.json", import.meta.url), "utf8");
+  const server = createViewer({ proxyKey, worker: stamp ? JSON.parse(stamp) : undefined });
+  process.on("SIGTERM", () => { if (!server.busy()) process.exit(0); });
+  server.listen(4310, proxyKey ? "0.0.0.0" : "127.0.0.1",
+    () => console.log("연어 UT 뷰어 http://127.0.0.1:4310"));
 }

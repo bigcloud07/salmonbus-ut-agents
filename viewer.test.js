@@ -5,6 +5,46 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { chromium } from "playwright";
 import { createViewer } from "./viewer.js";
+import { personas } from "./study.js";
+
+test("로컬 뷰어는 버전과 커밋을 비워 두고 유휴 상태를 알린다", async t => {
+  const server = createViewer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+  const control = await (await fetch(`http://127.0.0.1:${server.address().port}/api/control`)).json();
+  assert.deepEqual([control.version, control.commit, control.busy, server.busy()], [null, null, false, false]);
+});
+
+for (const [name, path] of [["UT", "/api/runs"], ["재분석", "/api/runs/fixture/review"], ["인터뷰", "/api/runs/fixture/interview"]]) {
+  test(`${name} 작업 중에는 사용 중으로 표시하고 완료되면 해제한다`, { timeout: 1000 }, async t => {
+    const root = await mkdtemp(join(tmpdir(), "ut-busy-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await mkdir(join(root, "fixture", "screens"), { recursive: true });
+    await writeFile(join(root, "fixture", "run.json"), JSON.stringify({ people: [personas[0]] }));
+    await writeFile(join(root, "fixture", "report.md"), "# 완료\n");
+    await writeFile(join(root, "fixture", "events.jsonl"), JSON.stringify({ kind: "frame", persona: "P1", task: "free", frame: "P1-free-01", image: "screens/P1-free-01.png" }) + "\n");
+    await writeFile(join(root, "fixture", "screens", "P1-free-01.png"), "image");
+    const { promise: pending, resolve: finish } = Promise.withResolvers();
+    const { promise: entered, resolve: enter } = Promise.withResolvers();
+    t.after(finish);
+    const wait = async () => { enter(); await pending; };
+    const worker = { version: "version", commit: "commit" };
+    const server = createViewer({ root, worker, startStudy: wait,
+      makeModel: () => ({ respond: async () => { await wait(); return { speech: "답변", assessments: [], findings: [] }; } }) });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const response = fetch(origin + path, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ persona: "P1", question: "어땠나요?" }) });
+    await entered;
+    const control = await (await fetch(origin + "/api/control")).json();
+    assert.deepEqual([control.version, control.commit, control.busy, server.busy()], [worker.version, worker.commit, true, true]);
+    finish();
+    assert.equal((await response).status, name === "UT" ? 202 : 200);
+    assert.equal((await (await fetch(origin + "/api/control")).json()).busy, false);
+    assert.equal(server.busy(), false);
+  });
+}
 
 test("웹 관찰실은 새 실행을 발견하고 선택한 장면을 유지하며 대화와 리포트를 표시한다", async t => {
   const root = await mkdtemp(join(tmpdir(), "salmonbus-viewer-"));
