@@ -128,6 +128,67 @@ test("상세에 의한 목록 실패는 포커스를 유지하고 제어 응답 
   }
 });
 
+test("실행을 바꾸면 이전 실행의 기록이 남지 않는다", async t => {
+  const { page, root, id, faults, addRun, alert } = await openFailureViewer(t);
+  await appendFile(join(root, id, "events.jsonl"), JSON.stringify({
+    kind: "tap_target", persona: "P1", task: "free", frame: "P1-free-01", x: 0, y: 0, viewport: { width: 1, height: 1 },
+  }) + "\n");
+  const capture = page.locator("#capture");
+  await page.locator("#events [data-frame]").first().waitFor();
+  await capture.waitFor();
+  await page.locator("#tap-marker").waitFor();
+  assert.notEqual(await page.locator("#events").textContent(), "");
+  assert.notEqual(await page.locator("#frame-info").textContent(), "");
+  assert.equal(await capture.getAttribute("src"), `/api/runs/${id}/screens/P1-free-01.png`);
+  assert.equal(await page.locator("#screen").evaluate(element => element.classList.contains("has-image")), true);
+  const second = "2026-11-03T03-00-00-000Z-aabbccdd";
+  await addRun(second, "P2");
+  await page.locator('[data-view="report"]').click();
+  await page.getByText("노선 목록을 확인했습니다.", { exact: true }).waitFor();
+  faults.set(`/api/runs/${second}`, async route => {
+    const response = await route.fetch();
+    const detail = await response.json();
+    detail.events = null;
+    await route.fulfill({ response, json: detail });
+  });
+  await page.locator('[data-view="activity"]').click();
+  await page.locator(`[data-run="${second}"]`).click();
+  await alert.waitFor();
+  assert.equal(await page.locator("#events").textContent(), "");
+  assert.equal(await capture.getAttribute("src"), null);
+  assert.equal(await capture.evaluate(image => image.hidden), true);
+  assert.equal(await page.locator("#tap-marker").evaluate(element => element.hidden), true);
+  assert.equal(await page.locator("#screen").evaluate(element => element.classList.contains("has-image")), false);
+  assert.equal(await page.locator("#frame-info").textContent(), "");
+  await capture.evaluate(image => {
+    image.dispatchEvent(new Event("load"));
+    image.dispatchEvent(new Event("error"));
+  });
+  assert.equal(await capture.evaluate(image => image.hidden), true);
+  assert.equal(await page.locator("#tap-marker").evaluate(element => element.hidden), true);
+  assert.equal(await page.locator("#report-records").textContent(), "");
+  assert.equal(await page.locator("#interview-records").textContent(), "");
+  assert.equal(await page.locator("#discussion-records").textContent(), "");
+});
+
+test("실패한 실행으로 돌아오면 다시 그린다", async t => {
+  const { page, id, detailPath, faults, addRun, breakDetail, renderErrors, alert } = await openFailureViewer(t);
+  const second = "2026-11-03T03-00-00-000Z-aabbccdd";
+  await addRun(second, "P2");
+  const secondButton = page.locator(`[data-run="${second}"]`);
+  await secondButton.waitFor();
+  faults.set(detailPath, breakDetail);
+  await alert.waitFor();
+  faults.set(`/api/runs/${second}`, route => route.abort());
+  await secondButton.click();
+  await page.locator("#detail").waitFor({ state: "hidden" });
+  const previousErrorCount = renderErrors.length;
+  await page.locator(`[data-run="${id}"]`).click();
+  await page.locator("#detail").waitFor();
+  assert.ok(renderErrors.length > previousErrorCount);
+  assert.equal(await alert.isVisible(), true);
+});
+
 test("정상 폴링과 장면 선택은 접어 둔 이전 리포트 요소를 유지한다", async t => {
   const { page, polls, alert } = await openFailureViewer(t);
   await page.locator('[data-view="report"]').click();

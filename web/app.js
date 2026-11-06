@@ -116,8 +116,18 @@ function chooseRun(id) {
   pinnedFrame = undefined;
   details = undefined;
   detailVersion = undefined;
+  failedRenders.delete("detail");
+  $("events").replaceChildren();
+  $("capture").removeAttribute("src");
+  $("capture").hidden = true;
+  $("tap-marker").hidden = true;
+  $("screen").classList.remove("has-image");
+  $("frame-info").textContent = "";
   $("interview-form").reset();
   $("interview-feedback").textContent = "";
+  $("interview-records").replaceChildren();
+  $("discussion-records").replaceChildren();
+  $("report-records").replaceChildren();
   $("interview-records").scrollTop = 0;
   $("discussion-records").scrollTop = 0;
   $("review-feedback").textContent = "";
